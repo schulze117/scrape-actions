@@ -31,7 +31,9 @@ jobs:
       # 4. Write config.json from Action Variable
       # Assumes you have a configuration variable named 'CONFIG_FILE'
       - name: Create config.json
-        run: echo "${{ vars.CONFIG_FILE }}" > config.json
+        env:
+          CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
+        run: echo "$CONFIG_JSON_CONTENT" > config.json
 
       # 5. Write .env file from Secrets
       # We explicitly map the secrets to the .env file as requested
