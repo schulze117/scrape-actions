@@ -1,4 +1,4 @@
-name: Run Kleinanzeigen Finder
+name: Run Immoscout Finder
 
 on:
   # Allows you to run this workflow manually from the Actions tab
@@ -42,7 +42,7 @@ jobs:
           echo "DATABASE__NAME=${{ secrets.DATABASE__NAME }}" >> .env
           echo "DATABASE__PASSWORD=${{ secrets.DATABASE__PASSWORD }}" >> .env
           echo "DATABASE__PORT=${{ secrets.DATABASE__PORT }}" >> .env
-          echo "PROXY_URL__KLEINANZEIGEN=${{ secrets.PROXY_URL__KLEINANZEIGEN }}" >> .env
+          echo "PROXY_URL__IMMOSCOUT=${{ secrets.PROXY_URL__IMMOSCOUT }}" >> .env
 
       # 6. Write the Google Credentials JSON
       # You must copy the content of immofinder-...json into a Secret named 'GCP_SERVICE_ACCOUNT_JSON'
@@ -50,5 +50,5 @@ jobs:
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}' > immofinder-438008-411bf1440a6c.json
 
       # 7. Run the Python module
-      - name: Run Kleinanzeigen Finder
-        run: python -m find.kleinanzeigen
+      - name: Run Immoscout Finder
+        run: python -m find.immoscout
