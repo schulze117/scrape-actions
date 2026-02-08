@@ -2,7 +2,7 @@ from seleniumbase import SB
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from lib.config import get_config
 from lib.logger import get_logger
-from lib.fetch.fetcher import has_bot_detection
+from lib.helpers import has_bot_detection
 
 config = get_config()
 logger = get_logger("_seleniumbase")
@@ -55,7 +55,6 @@ def get_html_seleniumbase(
                 sb.wait_for_ready_state_complete(timeout=timeout)
                 sb.sleep(5)
                 html = sb.get_page_source()
-            # --- end bot detection block ---
 
         return html
     except Exception as e:
