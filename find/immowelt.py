@@ -5,7 +5,7 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from lzstring import LZString
 
-from evaluator.logger import get_logger
+from lib.logger import get_logger
 from lib.config import get_config, get_env
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
 from lib.models import IMMOWELT_SEARCH_CATEGORIES, ListingSource, NewListing
