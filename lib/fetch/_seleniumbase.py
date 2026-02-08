@@ -2,6 +2,7 @@ from seleniumbase import SB
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from lib.config import get_config
 from lib.logger import get_logger
+from lib.fetch.fetcher import has_bot_detection
 
 config = get_config()
 logger = get_logger("_seleniumbase")
@@ -45,8 +46,17 @@ def get_html_seleniumbase(
         ) as sb:
             sb.activate_cdp_mode(url)
             sb.wait_for_ready_state_complete(timeout=timeout)
-            sb.sleep(1)
+            sb.sleep(2)
             html = sb.get_page_source()
+
+            if has_bot_detection(html):
+                logger.info("Bot detection detected, refreshing page and retrying once...")
+                sb.refresh()
+                sb.wait_for_ready_state_complete(timeout=timeout)
+                sb.sleep(5)
+                html = sb.get_page_source()
+            # --- end bot detection block ---
+
         return html
     except Exception as e:
         logger.error(f"Failed to fetch {url} with SeleniumBase: {e}")

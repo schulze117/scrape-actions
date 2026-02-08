@@ -5,12 +5,15 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from lzstring import LZString
 
+from evaluator.logger import get_logger
 from lib.config import get_config, get_env
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
 from lib.models import IMMOWELT_SEARCH_CATEGORIES, ListingSource, NewListing
 from .base import BaseFinder
 
 config = get_config()
+logger = get_logger("immowelt")
+
 lz = LZString()
 
 
@@ -41,6 +44,8 @@ class ImmoweltFinder(BaseFinder):
     def get_json_data(self, soup: BeautifulSoup) -> dict[str, Any]:
         script_tag = soup.find("script", string=lambda text: text is not None and "__UFRN_FETCHER__" in text)  # type: ignore
         if not script_tag:
+            # log the first 1000 characters of the page HTML for debugging
+            logger.info("Script tag with __UFRN_FETCHER__ not found. Page HTML (first 1000 chars):\n" + soup.prettify()[:1000])
             raise ElementNotFoundError("Script tag with __UFRN_FETCHER__")
         if type(script_tag) != Tag:
             raise NotBeautifulSoupError("script_tag")
