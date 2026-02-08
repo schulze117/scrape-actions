@@ -1,0 +1,6 @@
+.env
+config.json
+immofinder-438008-411bf1440a6c.json
+# Ignore all _pycache__ directories
+__pycache__/
+downloaded_files/

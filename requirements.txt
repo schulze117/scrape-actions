@@ -1,0 +1,12 @@
+seleniumbase
+google-cloud-compute
+google-auth
+requests
+beautifulsoup4
+lxml
+lzstring
+curl_cffi
+tenacity
+psycopg
+python-dotenv
+pydantic
