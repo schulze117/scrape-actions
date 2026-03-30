@@ -10,3 +10,4 @@ tenacity
 psycopg
 python-dotenv
 pydantic
+demjson3

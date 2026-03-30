@@ -14,7 +14,7 @@ def has_bot_detection(html: str, keywords: list[str] | None = None) -> bool:
         "ich bin kein roboter",   # German reCAPTCHA text
         "i am not a robot",
         "i’m not a robot",
-        "captcha",
+        # "captcha",
         "unusual traffic",
         "verify you are a human",
         "verify that you are human",
