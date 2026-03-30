@@ -106,6 +106,28 @@ GET_NEXT_LISTINGS_SQL: Composed = SQL(
     """
 ).format(source=Placeholder("source"), limit=Placeholder("limit"))
 
+GET_NEXT_LISTINGS_MODIFIED_SQL: Composed = SQL(
+    """
+    SELECT p.id,
+        p.source,
+        p.external_id,
+        p.created_at,
+        p.modified_at,
+        s.last_scraped_at
+    FROM fixnflip_v2.property p
+    LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
+    LEFT JOIN fixnflip_v2.system s ON s.property_id = p.id
+    WHERE p.source = {source}
+        AND (g.active = TRUE OR g.active IS NULL)
+        AND (s.last_scraped_at IS NULL OR p.modified_at > s.last_scraped_at)
+    ORDER BY
+        s.last_scraped_at IS NOT NULL,
+        s.last_scraped_at,
+        p.created_at
+    LIMIT {limit};
+    """
+).format(source=Placeholder("source"), limit=Placeholder("limit"))
+
 SET_RAW_DATA_SQL: Composed = SQL(
     "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}) ON CONFLICT ({conflict}) DO NOTHING"
 ).format(
@@ -298,10 +320,11 @@ class Database:
             self.logger.debug(f"Batch listing data set for {len(listings)} listings")
 
     @db_operation_with_retry
-    def get_next_listings(self, source: ListingSource, limit: int) -> list[NextListingModel]:
-        self.logger.debug(f"Getting next listings for source: '{source.value}' (limit: {limit})")
+    def get_next_listings(self, source: ListingSource, limit: int, rescrape_on_modified_only: bool = False) -> list[NextListingModel]:
+        self.logger.debug(f"Getting next listings for source: '{source.value}' (limit: {limit}, rescrape_on_modified_only: {rescrape_on_modified_only})")
+        sql = GET_NEXT_LISTINGS_MODIFIED_SQL if rescrape_on_modified_only else GET_NEXT_LISTINGS_SQL
         with self._db() as (_, cursor):
-            cursor.execute(GET_NEXT_LISTINGS_SQL, {"source": source.value, "limit": limit})
+            cursor.execute(sql, {"source": source.value, "limit": limit})
             results = cursor.fetchall()
         self.logger.debug(f"Found {len(results)} listings")
         return [NextListingModel(**row) for row in results]

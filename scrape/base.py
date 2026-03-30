@@ -15,6 +15,9 @@ from lib.models import ListingSource, NextListingModel
 class BaseScraper(ABC):
     # Default behavior: process listings concurrently (curl_cffi supports parallelism)
     CONCURRENT_LISTINGS = True
+    # When True: only re-scrape if modified_at > last_scraped_at (Immowelt, Immoscout)
+    # When False: re-scrape any listing older than 12h (Kleinanzeigen — no modified_at updates)
+    RESCRAPE_ON_MODIFIED_ONLY = False
 
     def __init__(self, source: ListingSource, method: str, proxy_url: str | None):
         self.source = source
@@ -38,7 +41,9 @@ class BaseScraper(ABC):
 
         try:
             while True:
-                listings = self.db.get_next_listings(self.source, batch_size)
+                listings = self.db.get_next_listings(
+                    self.source, batch_size, rescrape_on_modified_only=self.RESCRAPE_ON_MODIFIED_ONLY
+                )
 
                 if not listings:
                     self.logger.info(f"No more listings to scrape. Total processed: {total_scraped}")
