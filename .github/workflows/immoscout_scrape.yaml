@@ -1,9 +1,9 @@
 name: Run Immoscout Scraper
 
 on:
-  schedule:
+#   schedule:
 #     - cron: '0 */12 * * *'
-#   workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
   run-script:
