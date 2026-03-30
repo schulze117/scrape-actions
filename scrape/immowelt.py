@@ -1,3 +1,5 @@
+# TODO: Check if bot detection is triggered. If yes, stop the scraper
+
 import json
 from typing import Any
 
