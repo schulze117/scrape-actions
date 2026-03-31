@@ -1,9 +1,9 @@
 name: Run Kleinanzeigen Scraper
 
 on:
-  # run every 12 hours
+  # run every 6 hours
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 */6 * * *'
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 

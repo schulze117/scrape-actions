@@ -1,4 +1,4 @@
-import sys
+import os
 
 from seleniumbase import SB
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
@@ -68,7 +68,7 @@ def get_html_seleniumbase(
                     print(f"{'='*80}")
                     print(html)
                     print(f"{'='*80}\n")
-                    sys.exit(1)
+                    os._exit(1)
 
         return html
     except Exception as e:
