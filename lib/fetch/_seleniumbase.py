@@ -1,3 +1,5 @@
+import sys
+
 from seleniumbase import SB
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from lib.config import get_config
@@ -50,11 +52,23 @@ def get_html_seleniumbase(
             html = sb.get_page_source()
 
             if has_bot_detection(html):
-                logger.info("Bot detection detected, refreshing page and retrying once...")
+                logger.info("Bot detection suspected, refreshing page and retrying once...")
                 sb.refresh()
                 sb.wait_for_ready_state_complete(timeout=timeout)
                 sb.sleep(5)
                 html = sb.get_page_source()
+
+                if has_bot_detection(html):
+                    logger.error(
+                        f"Bot detection persists after refresh for {url}. "
+                        f"HTML length: {len(html)}. Stopping program."
+                    )
+                    print(f"\n{'='*80}")
+                    print(f"BOT DETECTION PAGE HTML ({url}):")
+                    print(f"{'='*80}")
+                    print(html)
+                    print(f"{'='*80}\n")
+                    sys.exit(1)
 
         return html
     except Exception as e:
@@ -63,7 +77,6 @@ def get_html_seleniumbase(
 
 # test fetch_html
 if __name__ == "__main__":
-    test_url = "https://www.immobilienscout24.de/expose/165390369"
-    proxy_url = "http://35.234.92.79:8888"
+    test_url = "https://www.immobilienscout24.de/expose/166611357"
+    proxy_url = "http://35.243.132.55:8888"
     html = get_html_seleniumbase(test_url, proxy_url=proxy_url)
-    print(f"Fetched {len(html)} characters from {test_url}")
