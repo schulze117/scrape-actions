@@ -89,7 +89,7 @@ CLAIM_EXPIRY_INTERVAL = "5 minutes"
 GET_NEXT_LISTINGS_SQL: Composed = SQL(
     f"""
     WITH candidates AS (
-        SELECT s.id AS system_id,
+        SELECT s.property_id AS system_property_id,
             p.id,
             p.source,
             p.external_id,
@@ -113,7 +113,7 @@ GET_NEXT_LISTINGS_SQL: Composed = SQL(
     claim AS (
         UPDATE fixnflip_v2.system
         SET claimed_at = NOW()
-        WHERE id IN (SELECT system_id FROM candidates)
+        WHERE property_id IN (SELECT system_property_id FROM candidates)
     )
     SELECT id, source, external_id, created_at, modified_at, last_scraped_at
     FROM candidates;
@@ -123,7 +123,7 @@ GET_NEXT_LISTINGS_SQL: Composed = SQL(
 GET_NEXT_LISTINGS_MODIFIED_SQL: Composed = SQL(
     f"""
     WITH candidates AS (
-        SELECT s.id AS system_id,
+        SELECT s.property_id AS system_property_id,
             p.id,
             p.source,
             p.external_id,
@@ -147,7 +147,7 @@ GET_NEXT_LISTINGS_MODIFIED_SQL: Composed = SQL(
     claim AS (
         UPDATE fixnflip_v2.system
         SET claimed_at = NOW()
-        WHERE id IN (SELECT system_id FROM candidates)
+        WHERE property_id IN (SELECT system_property_id FROM candidates)
     )
     SELECT id, source, external_id, created_at, modified_at, last_scraped_at
     FROM candidates;
