@@ -84,47 +84,73 @@ SYSTEM_INSERT_SQL: Composed = SQL(
     updates=SQL("{0} = EXCLUDED.{0}").format(Identifier("last_seen_at")),
 )
 
+CLAIM_EXPIRY_INTERVAL = "5 minutes"
+
 GET_NEXT_LISTINGS_SQL: Composed = SQL(
-    """
-    SELECT p.id,
-        p.source,
-        p.external_id,
-        p.created_at,
-        p.modified_at,
-        s.last_scraped_at
-    FROM fixnflip_v2.property p
-    LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
-    LEFT JOIN fixnflip_v2.system s ON s.property_id = p.id
-    WHERE p.source = {source}
-        AND (g.active = TRUE OR g.active IS NULL)
-        AND (s.last_scraped_at IS NULL OR s.last_scraped_at < NOW() - INTERVAL '12 hours')
-    ORDER BY
-        s.last_scraped_at IS NOT NULL,
-        s.last_scraped_at,
-        p.created_at
-    LIMIT {limit};
+    f"""
+    WITH candidates AS (
+        SELECT s.id AS system_id,
+            p.id,
+            p.source,
+            p.external_id,
+            p.created_at,
+            p.modified_at,
+            s.last_scraped_at
+        FROM fixnflip_v2.system s
+        JOIN fixnflip_v2.property p ON p.id = s.property_id
+        LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
+        WHERE p.source = {{source}}
+            AND (g.active = TRUE OR g.active IS NULL)
+            AND (s.last_scraped_at IS NULL OR s.last_scraped_at < NOW() - INTERVAL '12 hours')
+            AND (s.claimed_at IS NULL OR s.claimed_at < NOW() - INTERVAL '{CLAIM_EXPIRY_INTERVAL}')
+        ORDER BY
+            s.last_scraped_at IS NOT NULL,
+            s.last_scraped_at,
+            p.created_at
+        LIMIT {{limit}}
+        FOR UPDATE OF s SKIP LOCKED
+    ),
+    claim AS (
+        UPDATE fixnflip_v2.system
+        SET claimed_at = NOW()
+        WHERE id IN (SELECT system_id FROM candidates)
+    )
+    SELECT id, source, external_id, created_at, modified_at, last_scraped_at
+    FROM candidates;
     """
 ).format(source=Placeholder("source"), limit=Placeholder("limit"))
 
 GET_NEXT_LISTINGS_MODIFIED_SQL: Composed = SQL(
-    """
-    SELECT p.id,
-        p.source,
-        p.external_id,
-        p.created_at,
-        p.modified_at,
-        s.last_scraped_at
-    FROM fixnflip_v2.property p
-    LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
-    LEFT JOIN fixnflip_v2.system s ON s.property_id = p.id
-    WHERE p.source = {source}
-        AND (g.active = TRUE OR g.active IS NULL)
-        AND (s.last_scraped_at IS NULL OR p.modified_at > s.last_scraped_at)
-    ORDER BY
-        s.last_scraped_at IS NOT NULL,
-        s.last_scraped_at,
-        p.created_at
-    LIMIT {limit};
+    f"""
+    WITH candidates AS (
+        SELECT s.id AS system_id,
+            p.id,
+            p.source,
+            p.external_id,
+            p.created_at,
+            p.modified_at,
+            s.last_scraped_at
+        FROM fixnflip_v2.system s
+        JOIN fixnflip_v2.property p ON p.id = s.property_id
+        LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
+        WHERE p.source = {{source}}
+            AND (g.active = TRUE OR g.active IS NULL)
+            AND (s.last_scraped_at IS NULL OR p.modified_at > s.last_scraped_at)
+            AND (s.claimed_at IS NULL OR s.claimed_at < NOW() - INTERVAL '{CLAIM_EXPIRY_INTERVAL}')
+        ORDER BY
+            s.last_scraped_at IS NOT NULL,
+            s.last_scraped_at,
+            p.created_at
+        LIMIT {{limit}}
+        FOR UPDATE OF s SKIP LOCKED
+    ),
+    claim AS (
+        UPDATE fixnflip_v2.system
+        SET claimed_at = NOW()
+        WHERE id IN (SELECT system_id FROM candidates)
+    )
+    SELECT id, source, external_id, created_at, modified_at, last_scraped_at
+    FROM candidates;
     """
 ).format(source=Placeholder("source"), limit=Placeholder("limit"))
 
@@ -323,10 +349,11 @@ class Database:
     def get_next_listings(self, source: ListingSource, limit: int, rescrape_on_modified_only: bool = False) -> list[NextListingModel]:
         self.logger.debug(f"Getting next listings for source: '{source.value}' (limit: {limit}, rescrape_on_modified_only: {rescrape_on_modified_only})")
         sql = GET_NEXT_LISTINGS_MODIFIED_SQL if rescrape_on_modified_only else GET_NEXT_LISTINGS_SQL
-        with self._db() as (_, cursor):
+        with self._db() as (connection, cursor):
             cursor.execute(sql, {"source": source.value, "limit": limit})
             results = cursor.fetchall()
-        self.logger.debug(f"Found {len(results)} listings")
+            connection.commit()  # Commit to persist claimed_at and release row locks
+        self.logger.debug(f"Found and claimed {len(results)} listings")
         return [NextListingModel(**row) for row in results]
 
     @db_operation_with_retry
