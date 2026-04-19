@@ -68,7 +68,7 @@ def get_html_seleniumbase(
                     print(f"{'='*80}")
                     print(html)
                     print(f"{'='*80}\n")
-                    os._exit(1)
+                    os._exit(42)
 
         return html
     except Exception as e:

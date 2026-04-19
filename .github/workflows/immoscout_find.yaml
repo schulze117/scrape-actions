@@ -1,42 +1,42 @@
 name: Run Immoscout Finder
 
 on:
-  # run every 12 hours
   schedule:
     - cron: '0 */12 * * *'
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      retry_count:
+        description: 'Bot detection retry attempt'
+        required: false
+        default: '0'
+
+permissions:
+  contents: read
+  actions: write
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Check out the repository code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Set up Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14' # Adjust version if needed
+          python-version: '3.14'
 
-      # 3. Install dependencies from requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # 4. Write config.json from Action Variable
-      # Assumes you have a configuration variable named 'CONFIG_FILE'
       - name: Create config.json
         env:
           CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
         run: echo "$CONFIG_JSON_CONTENT" > config.json
 
-      # 5. Write .env file from Secrets
-      # We explicitly map the secrets to the .env file as requested
       - name: Create .env file
         run: |
           touch .env
@@ -47,11 +47,35 @@ jobs:
           echo "DATABASE__PORT=${{ secrets.DATABASE__PORT }}" >> .env
           echo "PROXY_URL__IMMOSCOUT=${{ secrets.PROXY_URL__IMMOSCOUT }}" >> .env
 
-      # 6. Write the Google Credentials JSON
-      # You must copy the content of immofinder-...json into a Secret named 'GCP_SERVICE_ACCOUNT_JSON'
       - name: Create Service Account JSON
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}' > immofinder-438008-411bf1440a6c.json
 
-      # 7. Run the Python module
       - name: Run Immoscout Finder
-        run: python -m find.immoscout
+        id: run
+        continue-on-error: true
+        run: |
+          set +e
+          python -m find.immoscout
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
+
+      - name: Retry on bot detection
+        if: steps.run.outputs.exit_code == '42'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RETRY="${{ inputs.retry_count }}"
+          RETRY=${RETRY:-0}
+          MAX=5
+          if [ "$RETRY" -lt "$MAX" ]; then
+            echo "Bot detected (attempt $((RETRY+1))/$MAX). Dispatching retry with new IP..."
+            gh workflow run immoscout_find.yaml -f retry_count=$((RETRY+1))
+          else
+            echo "Max retries ($MAX) reached."
+            exit 1
+          fi
+
+      - name: Fail on non-bot errors
+        if: steps.run.outcome == 'failure' && steps.run.outputs.exit_code != '42'
+        run: exit 1

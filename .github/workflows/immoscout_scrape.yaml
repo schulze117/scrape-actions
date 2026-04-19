@@ -4,6 +4,15 @@ on:
   schedule:
      - cron: '0 */2 * * *'
   workflow_dispatch:
+    inputs:
+      retry_count:
+        description: 'Bot detection retry attempt'
+        required: false
+        default: '0'
+
+permissions:
+  contents: read
+  actions: write
 
 jobs:
   run-script:
@@ -42,4 +51,31 @@ jobs:
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}' > immofinder-438008-411bf1440a6c.json
 
       - name: Run Immoscout Scraper
-        run: python -m scrape.immoscout
+        id: run
+        continue-on-error: true
+        run: |
+          set +e
+          python -m scrape.immoscout
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
+
+      - name: Retry on bot detection
+        if: steps.run.outputs.exit_code == '42'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RETRY="${{ inputs.retry_count }}"
+          RETRY=${RETRY:-0}
+          MAX=5
+          if [ "$RETRY" -lt "$MAX" ]; then
+            echo "Bot detected (attempt $((RETRY+1))/$MAX). Dispatching retry with new IP..."
+            gh workflow run immoscout_scrape.yaml -f retry_count=$((RETRY+1))
+          else
+            echo "Max retries ($MAX) reached."
+            exit 1
+          fi
+
+      - name: Fail on non-bot errors
+        if: steps.run.outcome == 'failure' && steps.run.outputs.exit_code != '42'
+        run: exit 1
