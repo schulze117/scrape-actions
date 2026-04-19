@@ -76,7 +76,7 @@ def fetch_stats(env: dict) -> dict:
         """)
         scraped_24h = {r["source"]: r["count"] for r in cur.fetchall()}
 
-        # Kleinanzeigen backlog: re-scrapes everything every 12h
+        # Kleinanzeigen: re-scrapes everything every 12h — count due in that cycle
         cur.execute("""
             SELECT COUNT(*) AS count
             FROM fixnflip_v2.system s
@@ -84,11 +84,12 @@ def fetch_stats(env: dict) -> dict:
             LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
             WHERE p.source = 'kleinanzeigen'
               AND (g.active = TRUE OR g.active IS NULL)
-              AND (s.last_scraped_at IS NULL OR s.last_scraped_at < NOW() - INTERVAL '12 hours')
+              AND s.last_scraped_at IS NOT NULL
+              AND s.last_scraped_at < NOW() - INTERVAL '12 hours'
         """)
-        ka_backlog = cur.fetchone()["count"]
+        ka_modified = cur.fetchone()["count"]
 
-        # Immoscout/Immowelt backlog: only re-scrape when modified_at changed
+        # Immoscout/Immowelt: only re-scrape when modified_at changed in last 24h
         cur.execute("""
             SELECT p.source, COUNT(*) AS count
             FROM fixnflip_v2.system s
@@ -96,11 +97,13 @@ def fetch_stats(env: dict) -> dict:
             LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
             WHERE p.source IN ('immoscout', 'immowelt')
               AND (g.active = TRUE OR g.active IS NULL)
-              AND (s.last_scraped_at IS NULL OR p.modified_at > s.last_scraped_at)
+              AND s.last_scraped_at IS NOT NULL
+              AND p.modified_at >= NOW() - INTERVAL '24 hours'
+              AND p.modified_at > s.last_scraped_at
             GROUP BY p.source
         """)
-        backlog = {"kleinanzeigen": ka_backlog}
-        backlog.update({r["source"]: r["count"] for r in cur.fetchall()})
+        modified = {"kleinanzeigen": ka_modified}
+        modified.update({r["source"]: r["count"] for r in cur.fetchall()})
 
         cur.execute("""
             SELECT p.source, COUNT(*) AS count
@@ -126,7 +129,7 @@ def fetch_stats(env: dict) -> dict:
         "new_found": new_found,
         "total_found": total_found,
         "scraped_24h": scraped_24h,
-        "backlog": backlog,
+        "modified": modified,
         "never_scraped": never_scraped,
         "active": active,
     }
@@ -191,17 +194,17 @@ def build_html(stats: dict, now: datetime) -> str:
         data_row(
             SOURCE_LABELS[src],
             fmt(s["scraped_24h"].get(src, 0)),
-            fmt(s["backlog"].get(src, 0)),
+            fmt(s["modified"].get(src, 0)),
             fmt(s["never_scraped"].get(src, 0)),
         )
         for src in SOURCES
     )
     scraper_table = (
-        header_row("Platform", "Scraped (24h)", "Backlog", "Never Scraped")
+        header_row("Platform", "Scraped (24h)", "Modified (24h)", "Never Scraped")
         + scraper_rows
         + total_row(
             fmt(total(s["scraped_24h"])),
-            fmt(total(s["backlog"])),
+            fmt(total(s["modified"])),
             fmt(total(s["never_scraped"])),
         )
     )
