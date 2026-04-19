@@ -76,17 +76,31 @@ def fetch_stats(env: dict) -> dict:
         """)
         scraped_24h = {r["source"]: r["count"] for r in cur.fetchall()}
 
-        # Active listings awaiting scrape (never scraped or scraped >12h ago)
+        # Kleinanzeigen backlog: re-scrapes everything every 12h
+        cur.execute("""
+            SELECT COUNT(*) AS count
+            FROM fixnflip_v2.system s
+            JOIN fixnflip_v2.property p ON p.id = s.property_id
+            LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
+            WHERE p.source = 'kleinanzeigen'
+              AND (g.active = TRUE OR g.active IS NULL)
+              AND (s.last_scraped_at IS NULL OR s.last_scraped_at < NOW() - INTERVAL '12 hours')
+        """)
+        ka_backlog = cur.fetchone()["count"]
+
+        # Immoscout/Immowelt backlog: only re-scrape when modified_at changed
         cur.execute("""
             SELECT p.source, COUNT(*) AS count
             FROM fixnflip_v2.system s
             JOIN fixnflip_v2.property p ON p.id = s.property_id
             LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
-            WHERE (g.active = TRUE OR g.active IS NULL)
-              AND (s.last_scraped_at IS NULL OR s.last_scraped_at < NOW() - INTERVAL '12 hours')
+            WHERE p.source IN ('immoscout', 'immowelt')
+              AND (g.active = TRUE OR g.active IS NULL)
+              AND (s.last_scraped_at IS NULL OR p.modified_at > s.last_scraped_at)
             GROUP BY p.source
         """)
-        backlog = {r["source"]: r["count"] for r in cur.fetchall()}
+        backlog = {"kleinanzeigen": ka_backlog}
+        backlog.update({r["source"]: r["count"] for r in cur.fetchall()})
 
         cur.execute("""
             SELECT p.source, COUNT(*) AS count
