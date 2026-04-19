@@ -2,7 +2,7 @@ name: Daily Pipeline Report
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # 07:00 CET / 08:00 CEST
+    - cron: '0 15 * * *'  # 17:00 CEST / 16:00 CET
   workflow_dispatch:
 
 jobs:
@@ -38,4 +38,4 @@ jobs:
           echo "EMAIL__TO=${{ secrets.EMAIL__TO }}" >> .env
 
       - name: Send daily report
-        run: python -m report.daily
+        run: python -m lib.daily
