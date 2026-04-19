@@ -67,7 +67,7 @@ jobs:
         run: |
           RETRY="${{ inputs.retry_count }}"
           RETRY=${RETRY:-0}
-          MAX=5
+          MAX=10
           if [ "$RETRY" -lt "$MAX" ]; then
             echo "Bot detected (attempt $((RETRY+1))/$MAX). Dispatching retry with new IP..."
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
