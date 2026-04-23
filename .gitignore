@@ -6,3 +6,8 @@ __pycache__/
 downloaded_files/
 bot_detection_example
 testing.ipynb
+.claude/
+graphify-out/
+dbdoc/
+claude.md
+extract/eval/data/
