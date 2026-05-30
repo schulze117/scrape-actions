@@ -11,4 +11,3 @@ psycopg
 python-dotenv
 pydantic
 demjson3
-shapely
