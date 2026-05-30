@@ -1,7 +1,6 @@
 seleniumbase
 google-cloud-compute
 google-auth
-google-genai
 requests
 beautifulsoup4
 lxml
@@ -13,5 +12,3 @@ python-dotenv
 pydantic
 demjson3
 shapely
-rapidfuzz
-anthropic

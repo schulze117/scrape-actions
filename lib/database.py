@@ -1,17 +1,14 @@
 import json
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
 import psycopg
 from psycopg.sql import SQL, Placeholder, Composed, Identifier
-from pydantic import BaseModel
-from shapely import to_wkt  # type: ignore
 
 from lib.config import get_config, get_env
-from lib.models import Address, ListingSource, NewListing, NextListingModel, NextRawDataModel
+from lib.models import ListingSource, NewListing, NextListingModel
 from datetime import datetime
 import zoneinfo
 from lib.logger import get_logger
@@ -58,8 +55,8 @@ SET_NEW_LISTING_DATA_SQL: Composed = SQL(
 
 SELECT_PROPERTY_IDS_SQL = SQL(
     """
-    SELECT id, external_id 
-    FROM {schema}.{table} 
+    SELECT id, external_id
+    FROM {schema}.{table}
     WHERE (external_id, source::text) IN (SELECT unnest(%(external_ids)s::text[]), unnest(%(sources)s::text[]))
     """
 ).format(schema=Identifier("fixnflip_v2"), table=Identifier("property"))
@@ -67,7 +64,6 @@ SELECT_PROPERTY_IDS_SQL = SQL(
 GENERAL_INSERT_SQL: Composed = SQL(
     # Dont update active status to True on conflicts since this will be handled by scraper and not finder
     "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}) ON CONFLICT ({conflict}) DO NOTHING"
-    # "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}) ON CONFLICT ({conflict}) DO UPDATE SET active = EXCLUDED.active"
 ).format(
     schema=Identifier("fixnflip_v2"),
     table=Identifier("general"),
@@ -221,6 +217,7 @@ DELETE_LISTING_SQL = SQL(
     system_table=Identifier("fixnflip_v2", "system"),
 )
 
+
 def safe_json_dumps(data: dict[str, Any]) -> str:
     text = json.dumps(data, ensure_ascii=False)
     return text.replace(r"\u0000", "")
@@ -274,14 +271,13 @@ class Database:
         ids = [row["kleinanzeigen_location_id"] for row in results]
         self.logger.debug(f"Found {len(ids)} IDs for state: {state}")
         return ids
-    
+
     @db_operation_with_retry
     def set_new_listing_data(self, listings: list[NewListing]) -> None:
         if not listings:
             self.logger.debug("No listings to process")
             return
 
-        # Log the listings being saved
         self.logger.debug(
             "Saving listings to DB: %s",
             [
@@ -378,7 +374,7 @@ class Database:
                 SET_IMAGE_URLS_SQL, [{"property_id": uuid, "url": url} for url in image_urls]
             )
             connection.commit()
-            self.logger.debug(f"Image URLs set for {uuid}")
+            self.logger.debug(f"Setting image URLs set for {uuid}")
 
     @db_operation_with_retry
     def set_main_image_url(self, uuid: UUID, image_url: str) -> None:
@@ -434,370 +430,3 @@ class Database:
                 cursor.execute(query, values)
             connection.commit()
             self.logger.debug(f"Extra data updated for {uuid}")
-
-    @db_operation_with_retry
-    def get_next_raw_data_batch(
-        self, source: ListingSource, limit: int, claim: bool = True
-    ) -> list[NextRawDataModel]:
-        action = "Claiming" if claim else "Peeking at"
-        self.logger.debug(f"{action} next raw data batch for source: '{source.value}' (limit: {limit})")
-        sql = GET_NEXT_RAW_DATA_SQL if claim else GET_NEXT_RAW_DATA_NOCLAIM_SQL
-        with self._db() as (connection, cursor):
-            cursor.execute(sql, {"source": source.value, "limit": limit})
-            results = cursor.fetchall()
-            if claim:
-                connection.commit()
-        self.logger.debug(f"Got {len(results)} raw data rows")
-        return [NextRawDataModel(**row) for row in results]
-
-    @db_operation_with_retry
-    def get_raw_data_by_external_ids(
-        self, source: ListingSource, external_ids: list[str]
-    ) -> list[NextRawDataModel]:
-        self.logger.debug(f"Fetching raw data for source '{source.value}' external_ids={external_ids}")
-        with self._db() as (_, cursor):
-            cursor.execute(
-                GET_RAW_DATA_BY_EXTERNAL_IDS_SQL,
-                {"source": source.value, "external_ids": external_ids},
-            )
-            results = cursor.fetchall()
-
-        rows_by_id = {row["external_id"]: row for row in results}
-        missing = [eid for eid in external_ids if eid not in rows_by_id]
-        if missing:
-            self.logger.warning(f"No raw data found for external_ids: {missing}")
-        return [NextRawDataModel(**rows_by_id[eid]) for eid in external_ids if eid in rows_by_id]
-
-    @db_operation_with_retry
-    def get_street_names_by_zipcode(self, zipcode: str) -> list[str]:
-        self.logger.debug(f"Getting street names for zipcode: {zipcode}")
-        with self._db() as (_, cursor):
-            cursor.execute(GET_STREET_NAMES_BY_ZIPCODE_SQL, {"zipcode": zipcode})
-            results = cursor.fetchall()
-
-        if not results:
-            return []
-
-        street_names = [row["street"] for row in results if row["street"]]
-        self.logger.debug(f"Found {len(street_names)} street names for zipcode: {zipcode}")
-        return street_names
-
-    @db_operation_with_retry
-    def get_suburbs_with_ids_by_zipcode(self, zipcode: str) -> dict[str, list[str]]:
-        self.logger.debug(f"Getting suburbs for zipcode: {zipcode}")
-        with self._db() as (_, cursor):
-            cursor.execute(GET_SUBURBS_BY_ZIPCODE_SQL, {"zipcode": zipcode})
-            results = cursor.fetchall()
-
-        if not results:
-            return {}
-
-        suburbs: dict[str, list[str]] = {}
-        for row in results:
-            suburb_name = row["name"]
-            suburb_id = row["id"]
-            suburbs.setdefault(suburb_name, []).append(suburb_id)
-
-        self.logger.debug(f"Found {len(suburbs)} suburbs for zipcode: {zipcode}")
-        return suburbs
-
-    @db_operation_with_retry
-    def set_address(self, uuid: UUID, address: Address) -> None:
-        with self._db() as (connection, cursor):
-            self.logger.debug(f"Setting address for {uuid}")
-            insert_sql, geog_params = build_set_address_sql(address)
-
-            params: dict[str, Any] = {
-                "property_id": uuid,
-                "street": address.street,
-                "house_number": address.house_number,
-                "zipcode": address.zipcode,
-                "city": address.city,
-                "suburb": address.suburb,
-                "state": address.state,
-            }
-            params.update(geog_params)
-
-            cursor.execute(insert_sql, params)
-            cursor.execute(
-                SET_PLACE_IDS_SQL,
-                {
-                    "property_id": uuid,
-                    "place_ids": "{" + ",".join(str(x) for x in address.place_ids) + "}" if address.place_ids else None,
-                },
-            )
-            connection.commit()
-            self.logger.debug(f"Address set for {uuid}")
-
-    @db_operation_with_retry
-    def set_last_extracted(self, uuid: UUID) -> None:
-        with self._db() as (connection, cursor):
-            self.logger.debug(f"Setting last_extracted_at for {uuid}")
-            cursor.execute(SET_LAST_EXTRACTED_SQL, {"property_id": uuid})
-            connection.commit()
-
-    @db_operation_with_retry
-    def batch_upsert(self, items: list["UpsertItem"]) -> None:
-        if not items:
-            return
-
-        with self._db() as (connection, cursor):
-            self.logger.debug(f"Batch upserting {len(items)} items")
-            for item in items:
-                insert_sql = item.generate_insert_sql()
-                if insert_sql is None:
-                    continue
-                cursor.execute(insert_sql, item.data)
-            connection.commit()
-
-
-@dataclass
-class UpsertItem:
-    model: BaseModel
-    uuid: UUID
-    table: str
-    conflict: list[str] = field(default_factory=lambda: ["property_id"])
-    data: dict[str, object] | None = None
-    exclude: set[str] = field(default_factory=lambda: set())
-
-    def __post_init__(self) -> None:
-        if self.data is None:
-            self.data = self.model.model_dump(exclude_none=True, exclude=self.exclude)
-            self.data["property_id"] = self.uuid
-
-        if not self.data:
-            raise ValueError("Data cannot be empty for upsert operation")
-
-    def generate_insert_sql(self) -> Composed | None:
-        if not self.data:
-            return None
-
-        columns = list(self.data.keys())
-        placeholders = [Placeholder(k) for k in columns]
-        identifiers = [Identifier(k) for k in columns]
-        conflicts = [Identifier(col) for col in self.conflict]
-        updates = [SQL("{0} = EXCLUDED.{0}").format(Identifier(col)) for col in columns if col not in self.conflict]
-
-        if not updates:
-            updates = [SQL("{0} = EXCLUDED.{0}").format(Identifier(self.conflict[0]))]
-
-        return SQL(
-            "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}) ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
-        ).format(
-            schema=Identifier("fixnflip_v2"),
-            table=Identifier(self.table),
-            fields=SQL(", ").join(identifiers),
-            values=SQL(", ").join(placeholders),
-            conflict=SQL(", ").join(conflicts),
-            updates=SQL(", ").join(updates),
-        )
-
-
-def build_set_address_sql(address: Address) -> tuple[Composed, dict[str, Any]]:
-    if address.coordinates is not None:
-        return SET_ADDRESS_WITH_COORDINATES_SQL, {"wkt_coords": to_wkt(address.coordinates)}
-
-    if address.latitude is None or address.longitude is None:
-        return SET_ADDRESS_WITHOUT_GEOG_SQL, {}
-
-    geog_params: dict[str, str | float] = {"longitude": address.longitude, "latitude": address.latitude}
-    if address.house_number is None:
-        return SET_ADDRESS_WITH_BUFFER_SQL, geog_params
-
-    return SET_ADDRESS_WITH_POINT_SQL, geog_params
-
-
-GET_NEXT_RAW_DATA_SQL: Composed = SQL(
-    f"""
-    WITH candidates AS (
-        SELECT s.property_id AS system_property_id,
-            p.id,
-            p.external_id,
-            s.last_scraped_at,
-            r.html,
-            r.json
-        FROM fixnflip_v2.system s
-        JOIN fixnflip_v2.property p ON p.id = s.property_id
-        LEFT JOIN fixnflip_v2.raw_data r ON r.property_id = p.id
-        LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
-        WHERE p.source = {{source}}
-            AND (g.active = TRUE OR g.active IS NULL)
-            AND s.last_scraped_at IS NOT NULL
-            AND r.html IS NOT NULL
-            AND (s.last_extracted_at IS NULL OR (
-                s.last_scraped_at > s.last_extracted_at AND p.modified_at > s.last_extracted_at
-            ))
-            AND (s.claimed_at IS NULL OR s.claimed_at < NOW() - INTERVAL '{CLAIM_EXPIRY_INTERVAL}')
-        ORDER BY
-            s.last_extracted_at IS NOT NULL,
-            s.last_extracted_at NULLS LAST,
-            s.last_scraped_at NULLS LAST
-        LIMIT {{limit}}
-        FOR UPDATE OF s SKIP LOCKED
-    ),
-    claim AS (
-        UPDATE fixnflip_v2.system
-        SET claimed_at = NOW()
-        WHERE property_id IN (SELECT system_property_id FROM candidates)
-    )
-    SELECT id, external_id, last_scraped_at, html, json
-    FROM candidates;
-    """
-).format(source=Placeholder("source"), limit=Placeholder("limit"))
-
-GET_NEXT_RAW_DATA_NOCLAIM_SQL: Composed = SQL(
-    """
-    SELECT p.id,
-        p.external_id,
-        s.last_scraped_at,
-        r.html,
-        r.json
-    FROM fixnflip_v2.system s
-    JOIN fixnflip_v2.property p ON p.id = s.property_id
-    LEFT JOIN fixnflip_v2.raw_data r ON r.property_id = p.id
-    LEFT JOIN fixnflip_v2.general g ON g.property_id = p.id
-    WHERE p.source = {source}
-        AND (g.active = TRUE OR g.active IS NULL)
-        AND s.last_scraped_at IS NOT NULL
-        AND r.html IS NOT NULL
-        AND (s.last_extracted_at IS NULL OR (
-            s.last_scraped_at > s.last_extracted_at AND p.modified_at > s.last_extracted_at
-        ))
-    ORDER BY
-        s.last_extracted_at IS NOT NULL,
-        s.last_extracted_at NULLS LAST,
-        s.last_scraped_at NULLS LAST,
-        p.id
-    LIMIT {limit};
-    """
-).format(source=Placeholder("source"), limit=Placeholder("limit"))
-
-GET_RAW_DATA_BY_EXTERNAL_IDS_SQL: Composed = SQL(
-    """
-    SELECT p.id,
-        p.external_id,
-        s.last_scraped_at,
-        r.html,
-        r.json
-    FROM fixnflip_v2.property p
-    JOIN fixnflip_v2.system s ON s.property_id = p.id
-    LEFT JOIN fixnflip_v2.raw_data r ON r.property_id = p.id
-    WHERE p.source = {source}
-        AND p.external_id = ANY({external_ids});
-    """
-).format(source=Placeholder("source"), external_ids=Placeholder("external_ids"))
-
-GET_STREET_NAMES_BY_ZIPCODE_SQL = SQL(
-    """
-    SELECT jsonb_array_elements_text(streets) as street
-    FROM germany.plz
-    WHERE plz = {zipcode};
-    """
-).format(zipcode=Placeholder("zipcode"))
-
-GET_SUBURBS_BY_ZIPCODE_SQL = SQL(
-    """
-    SELECT p.name, p.id
-    FROM germany.plz z,
-    LATERAL jsonb_array_elements_text(z.places) AS place_id
-    JOIN germany.places p ON p.id = place_id::bigint
-    WHERE z.plz = {zipcode}
-        AND p.name IS NOT NULL
-    ORDER BY p.name;
-    """
-).format(zipcode=Placeholder("zipcode"))
-
-SET_LAST_EXTRACTED_SQL: Composed = SQL(
-    "UPDATE {schema}.{table} SET {field} = now() WHERE {where_field} = {where_value}"
-).format(
-    schema=Identifier("fixnflip_v2"),
-    table=Identifier("system"),
-    field=Identifier("last_extracted_at"),
-    where_field=Identifier("property_id"),
-    where_value=Placeholder("property_id"),
-)
-
-_BASE_ADDRESS_FIELDS = SQL(", ").join(
-    [
-        Identifier("property_id"),
-        Identifier("street"),
-        Identifier("house_number"),
-        Identifier("zipcode"),
-        Identifier("city"),
-        Identifier("suburb"),
-        Identifier("state"),
-        Identifier("geog"),
-    ]
-)
-
-_BASE_ADDRESS_VALUES = SQL(", ").join(
-    [
-        Placeholder("property_id"),
-        Placeholder("street"),
-        Placeholder("house_number"),
-        Placeholder("zipcode"),
-        Placeholder("city"),
-        Placeholder("suburb"),
-        Placeholder("state"),
-    ]
-)
-
-_BASE_ADDRESS_UPDATES = SQL(", ").join(
-    [
-        SQL("{} = EXCLUDED.{}").format(Identifier("street"), Identifier("street")),
-        SQL("{} = EXCLUDED.{}").format(Identifier("house_number"), Identifier("house_number")),
-        SQL("{} = EXCLUDED.{}").format(Identifier("zipcode"), Identifier("zipcode")),
-        SQL("{} = EXCLUDED.{}").format(Identifier("city"), Identifier("city")),
-        SQL("{} = EXCLUDED.{}").format(Identifier("suburb"), Identifier("suburb")),
-        SQL("{} = EXCLUDED.{}").format(Identifier("state"), Identifier("state")),
-        SQL("{} = EXCLUDED.{}").format(Identifier("geog"), Identifier("geog")),
-    ]
-)
-
-SET_ADDRESS_WITH_COORDINATES_SQL: Composed = SQL(
-    "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}, ST_GeogFromText(%(wkt_coords)s)) ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
-).format(
-    schema=Identifier("fixnflip_v2"),
-    table=Identifier("location"),
-    fields=_BASE_ADDRESS_FIELDS,
-    values=_BASE_ADDRESS_VALUES,
-    conflict=Identifier("property_id"),
-    updates=_BASE_ADDRESS_UPDATES,
-)
-
-SET_ADDRESS_WITHOUT_GEOG_SQL: Composed = SQL(
-    "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}, NULL) ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
-).format(
-    schema=Identifier("fixnflip_v2"),
-    table=Identifier("location"),
-    fields=_BASE_ADDRESS_FIELDS,
-    values=_BASE_ADDRESS_VALUES,
-    conflict=Identifier("property_id"),
-    updates=_BASE_ADDRESS_UPDATES,
-)
-
-SET_ADDRESS_WITH_BUFFER_SQL: Composed = SQL(
-    "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}, ST_Buffer(ST_MakePoint(%(longitude)s, %(latitude)s)::geography, 1000)) ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
-).format(
-    schema=Identifier("fixnflip_v2"),
-    table=Identifier("location"),
-    fields=_BASE_ADDRESS_FIELDS,
-    values=_BASE_ADDRESS_VALUES,
-    conflict=Identifier("property_id"),
-    updates=_BASE_ADDRESS_UPDATES,
-)
-
-SET_ADDRESS_WITH_POINT_SQL: Composed = SQL(
-    "INSERT INTO {schema}.{table} ({fields}) VALUES ({values}, ST_MakePoint(%(longitude)s, %(latitude)s)::geography) ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
-).format(
-    schema=Identifier("fixnflip_v2"),
-    table=Identifier("location"),
-    fields=_BASE_ADDRESS_FIELDS,
-    values=_BASE_ADDRESS_VALUES,
-    conflict=Identifier("property_id"),
-    updates=_BASE_ADDRESS_UPDATES,
-)
-
-SET_PLACE_IDS_SQL: Composed = SQL(
-    "UPDATE {schema}.{table} SET place_ids = %(place_ids)s WHERE property_id = %(property_id)s"
-).format(schema=Identifier("fixnflip_v2"), table=Identifier("location"))
