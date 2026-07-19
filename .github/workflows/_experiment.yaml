@@ -1,0 +1,32 @@
+name: _EXPERIMENT (throwaway)
+
+# Throwaway: runs mdmintz's exact bare CDP config (ad_block, no tz/geo) against
+# immoscout on ARM64 + apt chromium, to rule out our extra settings. Deleted after.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bare:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Chromium (ARM)
+        run: sudo apt-get update && sudo apt-get install -y chromium
+      - name: Run bare experiment
+        continue-on-error: true
+        run: python _experiment_bare.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bare-result
+          path: bare_out/
+          if-no-files-found: warn
