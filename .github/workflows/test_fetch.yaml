@@ -19,13 +19,14 @@ on:
           - seleniumbase
           - curl_cffi
       runner:
-        description: 'Runner (arm64 = different IP pool + real apt Chromium; may be stealthier)'
+        description: 'Runner OS (arm64 = apt Chromium; windows = different OS/env)'
         required: true
         default: 'ubuntu-latest'
         type: choice
         options:
           - ubuntu-latest
           - ubuntu-24.04-arm
+          - windows-latest
 
 permissions:
   contents: read
@@ -33,6 +34,9 @@ permissions:
 jobs:
   fetch:
     runs-on: ${{ inputs.runner }}
+    defaults:
+      run:
+        shell: bash   # use bash on Windows runners too (Git Bash is preinstalled)
 
     steps:
       - name: Checkout code
