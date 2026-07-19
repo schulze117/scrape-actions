@@ -1,3 +1,4 @@
+import logging
 import os
 
 from seleniumbase import sb_cdp
@@ -9,16 +10,26 @@ from lib.helpers import has_bot_detection
 config = get_config()
 logger = get_logger("_seleniumbase")
 
+# tenacity's before_sleep_log needs an int level; config.log_level is a string.
+_LOG_LEVEL_INT = getattr(logging, str(getattr(config, "log_level", "INFO")).upper(), logging.INFO)
+
 # On a bot-detection / captcha page, how many solve+reload cycles to try before
 # giving up on this IP (then the workflow re-dispatches on a fresh runner IP).
 BOT_SOLVE_ATTEMPTS = 3
 
 # --- Hard-case stealth defaults (mdmintz's advice for the toughest anti-bot) ---
-# Pure CDP Mode + the unbranded Chromium browser is the most stealthy combo.
+# Pure CDP Mode with a matching timezone/geolocation is the stealthy combo that
+# works on x86 GitHub Actions (Azure) IPs using the runner's preinstalled
+# google-chrome — the same setup mdmintz uses to bypass DataDome/Walmart there.
 # Timezone/geolocation must match the exit IP's country, else it's a tell.
 # These are read from config.seleniumbase when present, else fall back to here,
 # so the deployed CONFIG_FILE variable does not have to be updated in lockstep.
-DEFAULT_USE_CHROMIUM = True
+#
+# use_chromium (unbranded Chromium) is an extra lever for the very hardest cases,
+# but on x86 ubuntu-latest neither `seleniumbase get chromium` (missing libs) nor
+# apt chromium (snap wrapper) launches reliably, so it defaults OFF. Enable it
+# only where a working Chromium binary is present (e.g. ARM runners / apt deb).
+DEFAULT_USE_CHROMIUM = False
 DEFAULT_TZONE = "Europe/Berlin"
 DEFAULT_GEOLOC = (52.520008, 13.404954)  # Berlin
 DEFAULT_LANG = "de-DE"
@@ -82,7 +93,7 @@ def _build_chrome_kwargs(proxy_url: str | None) -> dict:
     stop=stop_after_attempt(config.seleniumbase.max_retries),
     wait=wait_fixed(config.seleniumbase.retry_delay),
     reraise=True,
-    before_sleep=before_sleep_log(logger, config.log_level)
+    before_sleep=before_sleep_log(logger, _LOG_LEVEL_INT)
 )
 def get_html_seleniumbase(
     url: str,

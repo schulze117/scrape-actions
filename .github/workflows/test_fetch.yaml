@@ -40,13 +40,6 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Install virtual display (Xvfb)
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-
-      - name: Install undetected Chromium (for seleniumbase hard-case stealth)
-        if: ${{ inputs.method == 'seleniumbase' }}
-        run: seleniumbase get chromium
-
       - name: Create config.json
         env:
           CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
