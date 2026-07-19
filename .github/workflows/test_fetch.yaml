@@ -18,13 +18,21 @@ on:
         options:
           - seleniumbase
           - curl_cffi
+      runner:
+        description: 'Runner (arm64 = different IP pool + real apt Chromium; may be stealthier)'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
 
 permissions:
   contents: read
 
 jobs:
   fetch:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
 
     steps:
       - name: Checkout code
@@ -39,6 +47,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # ARM64 runners have no preinstalled google-chrome; apt Chromium is a real
+      # deb there (unlike the broken x86 snap) and becomes the auto-detected
+      # browser. mdmintz uses this exact setup to beat DataDome on ARM.
+      - name: Install Chromium (ARM64 only)
+        if: ${{ contains(inputs.runner, 'arm') }}
+        run: sudo apt-get update && sudo apt-get install -y chromium
 
       - name: Create config.json
         env:
