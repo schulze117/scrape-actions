@@ -1,4 +1,6 @@
-seleniumbase
+seleniumbase>=4.51.1
+sbvirtualdisplay
+pyvirtualdisplay
 google-cloud-compute
 google-auth
 requests

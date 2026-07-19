@@ -4,9 +4,10 @@ logger = get_logger("helpers")
 
 BOT_DETECTION_CHAR_THRESHOLD = 10_000
 
-# High-confidence markers of a bot/captcha block page. These are specific to the
-# challenge pages (AWS WAF / Imperva, Cloudflare, DataDome/PerimeterX, Google) and
-# do NOT appear on real listing content, so they are safe from false positives.
+# High-confidence markers of a bot/captcha BLOCK page. These must appear ONLY on
+# the challenge page, never on real content — otherwise they'd false-positive.
+# (Deliberately excludes generic vendor tokens like "datadome"/"px-captcha":
+# those load on normal pages of sites that use them, so they aren't block-only.)
 # Needed because a *rendered* interactive captcha page (e.g. immoscout's AWS WAF
 # image puzzle) balloons past the length threshold and would otherwise slip through.
 BOT_DETECTION_MARKERS = (
@@ -14,10 +15,7 @@ BOT_DETECTION_MARKERS = (
     "sdk.awswaf.com",           # AWS WAF challenge SDK
     "awswafcaptcha",            # <awswaf-captcha> widget / AwsWafCaptcha API
     "ich bin kein roboter",     # immoscout AWS WAF block-page title
-    "/challenge-platform/",     # Cloudflare challenge
-    "just a moment...",         # Cloudflare interstitial title
-    "px-captcha",               # PerimeterX
-    "datadome",                 # DataDome
+    "just a moment...",         # Cloudflare interstitial title (block-only)
 )
 
 
