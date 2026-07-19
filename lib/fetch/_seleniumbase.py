@@ -145,6 +145,9 @@ def get_html_seleniumbase(
             else:
                 if screenshot_path:
                     _save_screenshot(sb, screenshot_path)
+                    # os._exit below kills the process before the caller can
+                    # write anything, so persist the block-page HTML here too.
+                    _save_html(html, os.path.splitext(screenshot_path)[0] + ".html")
                 logger.error(
                     f"Bot detection persists after {BOT_SOLVE_ATTEMPTS} solve+reload attempts "
                     f"for {url}. HTML length: {len(html)}. Stopping program."
@@ -181,6 +184,16 @@ def _save_screenshot(sb, path: str) -> None:
         logger.info(f"Saved screenshot to {os.path.join(folder, name)}")
     except Exception as e:
         logger.info(f"Could not save screenshot: {e}")
+
+
+def _save_html(html: str, path: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        logger.info(f"Saved page HTML to {path}")
+    except Exception as e:
+        logger.info(f"Could not save HTML: {e}")
 
 
 # test fetch
