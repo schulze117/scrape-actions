@@ -9,6 +9,10 @@ from lib.helpers import has_bot_detection
 config = get_config()
 logger = get_logger("_seleniumbase")
 
+# When a bot-detection / captcha page is served, reload the page this many times
+# before giving up on this IP. Reloading sometimes clears the AWS WAF challenge.
+BOT_RELOAD_ATTEMPTS = 3
+
 
 @retry(
     stop=stop_after_attempt(config.seleniumbase.max_retries),
@@ -52,15 +56,24 @@ def get_html_seleniumbase(
             html = sb.get_page_source()
 
             if has_bot_detection(html):
-                logger.info("Bot detection suspected, refreshing page and retrying once...")
-                sb.refresh()
-                sb.wait_for_ready_state_complete(timeout=timeout)
-                sb.sleep(5)
-                html = sb.get_page_source()
-
-                if has_bot_detection(html):
+                # Reloading sometimes clears the (AWS WAF) bot-detection challenge.
+                # Try several reloads before giving up on this IP (then the workflow
+                # re-dispatches on a fresh runner IP).
+                for reload_attempt in range(1, BOT_RELOAD_ATTEMPTS + 1):
+                    logger.info(
+                        f"Bot detection suspected, reloading page "
+                        f"(reload {reload_attempt}/{BOT_RELOAD_ATTEMPTS})..."
+                    )
+                    sb.refresh()
+                    sb.wait_for_ready_state_complete(timeout=timeout)
+                    sb.sleep(5)
+                    html = sb.get_page_source()
+                    if not has_bot_detection(html):
+                        logger.info(f"Bot detection cleared after reload {reload_attempt}.")
+                        break
+                else:
                     logger.error(
-                        f"Bot detection persists after refresh for {url}. "
+                        f"Bot detection persists after {BOT_RELOAD_ATTEMPTS} reloads for {url}. "
                         f"HTML length: {len(html)}. Stopping program."
                     )
                     print(f"\n{'='*80}")
