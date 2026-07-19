@@ -9,9 +9,24 @@ from lib.helpers import has_bot_detection
 config = get_config()
 logger = get_logger("_seleniumbase")
 
-# When a bot-detection / captcha page is served, reload the page this many times
-# before giving up on this IP. Reloading sometimes clears the AWS WAF challenge.
-BOT_RELOAD_ATTEMPTS = 3
+# On a bot-detection / captcha page, how many solve+reload cycles to try before
+# giving up on this IP (then the workflow re-dispatches on a fresh runner IP).
+BOT_SOLVE_ATTEMPTS = 3
+
+
+def _try_solve_captcha(sb) -> str | None:
+    """Best-effort click/solve of the captcha widget (AWS WAF / Imperva / Cloudflare
+    / reCAPTCHA). Uses whichever method the installed SeleniumBase version exposes;
+    requires uc=True + a display (xvfb=True). Returns the method name used, or None."""
+    for name in ("solve_captcha", "gui_click_captcha", "uc_gui_click_captcha"):
+        fn = getattr(sb, name, None)
+        if callable(fn):
+            try:
+                fn()
+                return name
+            except Exception as e:  # method may not apply to this captcha type
+                logger.info(f"{name}() did not apply: {e}")
+    return None
 
 
 @retry(
@@ -56,25 +71,36 @@ def get_html_seleniumbase(
             html = sb.get_page_source()
 
             if has_bot_detection(html):
-                # Reloading sometimes clears the (AWS WAF) bot-detection challenge.
-                # Try several reloads before giving up on this IP (then the workflow
-                # re-dispatches on a fresh runner IP).
-                for reload_attempt in range(1, BOT_RELOAD_ATTEMPTS + 1):
+                # Try to actively clear the captcha (AWS WAF / Imperva). Each cycle:
+                # click/solve the captcha, wait for the WAF token, and if still
+                # blocked, reload and re-check. Only then give up (workflow rotates IP).
+                for solve_attempt in range(1, BOT_SOLVE_ATTEMPTS + 1):
                     logger.info(
-                        f"Bot detection suspected, reloading page "
-                        f"(reload {reload_attempt}/{BOT_RELOAD_ATTEMPTS})..."
+                        f"Bot detection suspected, attempting captcha solve "
+                        f"(attempt {solve_attempt}/{BOT_SOLVE_ATTEMPTS})..."
                     )
-                    sb.refresh()
-                    sb.wait_for_ready_state_complete(timeout=timeout)
-                    sb.sleep(5)
+                    used = _try_solve_captcha(sb)
+                    sb.sleep(8)  # give the WAF challenge time to issue a token / redirect
                     html = sb.get_page_source()
                     if not has_bot_detection(html):
-                        logger.info(f"Bot detection cleared after reload {reload_attempt}.")
+                        logger.info(
+                            f"Bot detection cleared after solve attempt {solve_attempt} "
+                            f"(method: {used or 'wait-only'})."
+                        )
+                        break
+
+                    # Fallback: reload the page and re-check.
+                    sb.refresh()
+                    sb.wait_for_ready_state_complete(timeout=timeout)
+                    sb.sleep(4)
+                    html = sb.get_page_source()
+                    if not has_bot_detection(html):
+                        logger.info(f"Bot detection cleared after reload (attempt {solve_attempt}).")
                         break
                 else:
                     logger.error(
-                        f"Bot detection persists after {BOT_RELOAD_ATTEMPTS} reloads for {url}. "
-                        f"HTML length: {len(html)}. Stopping program."
+                        f"Bot detection persists after {BOT_SOLVE_ATTEMPTS} solve+reload attempts "
+                        f"for {url}. HTML length: {len(html)}. Stopping program."
                     )
                     print(f"\n{'='*80}")
                     print(f"BOT DETECTION PAGE HTML ({url}):")
