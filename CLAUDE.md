@@ -103,7 +103,7 @@ Method and `max_workers` per source in `config.json`.
 
 **Bot detection**: `helpers.has_bot_detection()` flags HTML shorter than 10K chars. On a hit, `_seleniumbase.py` waits + reloads (and best-effort `solve_captcha()`) up to `BOT_SOLVE_ATTEMPTS` (3) times, then `os._exit(42)`; the workflow auto-re-dispatches on a fresh runner IP. Note: `solve_captcha()` only handles Cloudflare Turnstile + reCAPTCHA — it is a **no-op against immoscout's AWS WAF interactive captcha**, which is unsolvable for free. The only win against that WAF is not being served the puzzle tier (better stealth and/or a residential IP).
 
-**Debugging fetches**: the **Test Fetch URL** workflow (`test_fetch.yaml`) / `python -m tools.fetch_url --url <URL> [--method seleniumbase|curl_cffi]` runs any URL through this same fetch layer and reports HTML length, page title, bot-detection flag, plus the raw HTML + a screenshot (uploaded as a CI artifact). Use it to A/B stealth changes on a real runner IP without touching the live finder/scraper.
+**Debugging fetches**: the **Test Fetch URL** workflow (`test_fetch.yaml`) / `python -m lib.fetch.fetch_url --url <URL> [--method seleniumbase|curl_cffi]` runs any URL through this same fetch layer and reports HTML length, page title, bot-detection flag, plus the raw HTML + a screenshot (uploaded as a CI artifact). Use it to A/B stealth changes on a real runner IP without touching the live finder/scraper.
 
 **GCP Proxy**: `FirewallManager` in `lib/proxy.py` auto-whitelists runner IP against GCP firewall. Cleanup via `atexit`. Only active when `use_proxy=True`.
 

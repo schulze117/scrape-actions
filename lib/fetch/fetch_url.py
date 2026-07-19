@@ -6,8 +6,8 @@ page title, whether bot detection tripped, plus the raw HTML and (for the
 browser method) a screenshot saved to an output folder.
 
 Run locally:
-    python -m tools.fetch_url --url "https://www.immobilienscout24.de/..."
-    python -m tools.fetch_url --url "https://www.kleinanzeigen.de/" --method curl_cffi
+    python -m lib.fetch.fetch_url --url "https://www.immobilienscout24.de/..."
+    python -m lib.fetch.fetch_url --url "https://www.kleinanzeigen.de/" --method curl_cffi
 
 In CI it's driven by .github/workflows/test_fetch.yaml, which uploads the
 output folder as an artifact. Exit code is 42 when the browser method hit

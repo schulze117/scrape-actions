@@ -106,7 +106,7 @@ def get_html_seleniumbase(
     On a suspected bot/captcha page it waits + reloads (and best-effort solves)
     up to BOT_SOLVE_ATTEMPTS times, then os._exit(42) so the workflow re-dispatches
     on a fresh runner IP. `screenshot_path`, when given, saves a PNG of the final
-    page — used by the tools.fetch_url test harness (no overhead in production).
+    page — used by the lib.fetch.fetch_url test harness (no overhead in production).
     """
     timeout = timeout if timeout is not None else config.seleniumbase.timeout
     initial_wait = _sb_setting("initial_wait", DEFAULT_INITIAL_WAIT)

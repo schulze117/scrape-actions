@@ -50,7 +50,7 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          python -m tools.fetch_url --url "${{ inputs.url }}" --method "${{ inputs.method }}" --out-dir test_output
+          python -m lib.fetch.fetch_url --url "${{ inputs.url }}" --method "${{ inputs.method }}" --out-dir test_output
           echo "exit_code=$?" >> $GITHUB_OUTPUT
 
       - name: Upload result (HTML + screenshot)
