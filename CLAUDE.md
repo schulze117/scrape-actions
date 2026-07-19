@@ -93,11 +93,17 @@ Scrapers run: Kleinanzeigen every 6h (`0 */6 * * *`), Immoscout/Immowelt every 2
 
 `lib/fetch/fetcher.py` routes by method:
 - `curl_cffi` → `_curl_cffi.py` (fast, concurrent, Chrome impersonation) — Kleinanzeigen
-- `seleniumbase` → `_seleniumbase.py` (headless undetected-Chrome CDP) — Immoscout, Immowelt
+- `seleniumbase` → `_seleniumbase.py` (**Pure CDP Mode**, `sb_cdp.Chrome`) — Immoscout, Immowelt
 
 Method and `max_workers` per source in `config.json`.
 
-**Bot detection**: `helpers.has_bot_detection()` checks HTML length < 10K. SeleniumBase retries once, then `os._exit(42)`. Workflows auto-retry up to 5× on a new runner IP.
+**SeleniumBase stealth (hard-case config, per mdmintz)**: `_seleniumbase.py` uses **Pure CDP Mode** with the **unbranded Chromium** browser (`use_chromium=True`), timezone + geolocation matched to the exit IP (`tzone="Europe/Berlin"`, `geoloc=[52.52, 13.40]`), German `lang`, headed under Xvfb on Linux. The default user-agent is left untouched (overriding it gets detected). These knobs live in `config.seleniumbase` but have code-level fallbacks in `_seleniumbase.py` (`DEFAULT_*`), so an older deployed `CONFIG_FILE` variable still works.
+
+> **Requires the unbranded Chromium browser.** Every seleniumbase workflow runs `seleniumbase get chromium` before the script. If you add a new seleniumbase-based workflow, include that step.
+
+**Bot detection**: `helpers.has_bot_detection()` flags HTML shorter than 10K chars. On a hit, `_seleniumbase.py` waits + reloads (and best-effort `solve_captcha()`) up to `BOT_SOLVE_ATTEMPTS` (3) times, then `os._exit(42)`; the workflow auto-re-dispatches on a fresh runner IP. Note: `solve_captcha()` only handles Cloudflare Turnstile + reCAPTCHA — it is a **no-op against immoscout's AWS WAF interactive captcha**, which is unsolvable for free. The only win against that WAF is not being served the puzzle tier (better stealth and/or a residential IP).
+
+**Debugging fetches**: the **Test Fetch URL** workflow (`test_fetch.yaml`) / `python -m tools.fetch_url --url <URL> [--method seleniumbase|curl_cffi]` runs any URL through this same fetch layer and reports HTML length, page title, bot-detection flag, plus the raw HTML + a screenshot (uploaded as a CI artifact). Use it to A/B stealth changes on a real runner IP without touching the live finder/scraper.
 
 **GCP Proxy**: `FirewallManager` in `lib/proxy.py` auto-whitelists runner IP against GCP firewall. Cleanup via `atexit`. Only active when `use_proxy=True`.
 
@@ -113,10 +119,12 @@ Local: both files at repo root. GitHub Actions: `CONFIG_FILE` variable + secrets
 
 ## GitHub Actions
 
-6 workflows in `.github/workflows/`:
+7 workflows in `.github/workflows/`:
 - **Finders** (3): every 12h (`0 */12 * * *`)
 - **Scrapers** (3): Kleinanzeigen every 6h (`0 */6 * * *`), Immoscout/Immowelt every 2h (`0 */2 * * *`)
+- **Test Fetch URL** (`test_fetch.yaml`): manual only — fetch one URL via the shared fetch layer, upload HTML + screenshot artifact. Needs only `CONFIG_FILE` (no DB/proxy secrets).
 - All support manual `workflow_dispatch`
+- Every **seleniumbase** workflow (immoscout/immowelt find+scrape, test_fetch) runs `seleniumbase get chromium` after installing deps.
 
 The daily report email lives in the separate [`reporter`](../reporter/) service.
 

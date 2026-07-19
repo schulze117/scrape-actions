@@ -1,0 +1,73 @@
+name: Test Fetch URL
+
+# Manual tool: fetch any URL through the SAME fetch layer the finder/scraper
+# use, and report HTML length + a screenshot + the raw HTML as an artifact.
+# Handy for debugging bot detection on a real GitHub Actions runner IP.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to fetch (e.g. an immoscout search/expose URL)'
+        required: true
+      method:
+        description: 'Fetcher to use'
+        required: true
+        default: 'seleniumbase'
+        type: choice
+        options:
+          - seleniumbase
+          - curl_cffi
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Install virtual display (Xvfb)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Install undetected Chromium (for seleniumbase hard-case stealth)
+        if: ${{ inputs.method == 'seleniumbase' }}
+        run: seleniumbase get chromium
+
+      - name: Create config.json
+        env:
+          CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
+        run: echo "$CONFIG_JSON_CONTENT" > config.json
+
+      - name: Fetch the URL
+        id: fetch
+        continue-on-error: true
+        run: |
+          set +e
+          python -m tools.fetch_url --url "${{ inputs.url }}" --method "${{ inputs.method }}" --out-dir test_output
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Upload result (HTML + screenshot)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetch-result
+          path: test_output/
+          if-no-files-found: warn
+
+      - name: Report bot detection
+        if: ${{ steps.fetch.outputs.exit_code == '42' }}
+        run: |
+          echo "::warning::Fetch returned a bot-detection / captcha page (exit 42)."
