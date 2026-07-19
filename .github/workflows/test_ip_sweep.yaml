@@ -1,0 +1,78 @@
+name: Test IP Sweep
+
+# Diagnostic: fetch the same URL from 20 runners in parallel (20 different
+# GitHub Actions IPs at once) to see whether ANY datacenter IP slips past the
+# WAF with the current stealth setup. Each job prints its public IP + result.
+# This is what the finder's exit-42 retry loop does sequentially, compressed
+# into one dispatch. Aggregate the "SWEEP_RESULT" lines from the run logs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to fetch'
+        required: true
+        default: 'https://www.immobilienscout24.de/Suche/shape/wohnung-mieten?shape=dWZqcEhjYGVwQH5_SH1hQ256S312QWh2Tml_UWR3RHt1Un5jQ2N2X0B_dURtfU1lekRvfFN9aUB7eGJAfWxPYXtXYWFSd3RMX2NWX3hJe3BjQHRgT3t6SmhxekByek1_Y1p2d0Jwak9sdkxyYXtAfG9NaHVP&enteredFrom=result_list&sorting=2'
+      method:
+        description: 'Fetcher to use'
+        required: true
+        default: 'seleniumbase'
+        type: choice
+        options:
+          - seleniumbase
+          - curl_cffi
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Create config.json
+        env:
+          CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
+        run: echo "$CONFIG_JSON_CONTENT" > config.json
+
+      - name: Show public IP
+        id: ip
+        run: echo "ip=$(curl -s https://api.ipify.org)" >> $GITHUB_OUTPUT
+
+      - name: Fetch the URL
+        id: fetch
+        continue-on-error: true
+        run: |
+          set +e
+          python -m lib.fetch.fetch_url --url "${{ inputs.url }}" --method "${{ inputs.method }}" --out-dir out
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Summarize
+        run: |
+          if [ "${{ steps.fetch.outputs.exit_code }}" = "0" ]; then
+            RESULT="PASS (real content)"
+          elif [ "${{ steps.fetch.outputs.exit_code }}" = "42" ]; then
+            RESULT="CAPTCHA / blocked"
+          else
+            RESULT="ERROR (exit ${{ steps.fetch.outputs.exit_code }})"
+          fi
+          echo "SWEEP_RESULT n=${{ matrix.n }} ip=${{ steps.ip.outputs.ip }} exit=${{ steps.fetch.outputs.exit_code }} result=$RESULT"
+          echo "### IP sweep #${{ matrix.n }}" >> $GITHUB_STEP_SUMMARY
+          echo "IP \`${{ steps.ip.outputs.ip }}\` -> $RESULT" >> $GITHUB_STEP_SUMMARY
