@@ -36,7 +36,16 @@ DEFAULT_LANG = "de-DE"
 # Silent AWS-WAF / anti-bot challenges auto-clear a few seconds after load
 # (the challenge JS reloads the page once it issues a token). Wait for that
 # before declaring bot detection — the initial page source is often the shim.
-DEFAULT_INITIAL_WAIT = 8
+#
+# From a residential exit IP immoscout serves the *self-clearing* WAF page
+# ("Gleich geht's weiter"), not the unsolvable puzzle. Its JS polls for a token
+# every 200ms for up to ~10s and then reloads itself, so 8s landed just short of
+# the finish line — and reloading it ourselves restarts that clock. Hence: wait
+# past the self-reload, then keep polling patiently before escalating.
+DEFAULT_INITIAL_WAIT = 12
+# How long to let a challenge resolve on its own, and how often to re-check.
+CHALLENGE_WAIT = 40
+CHALLENGE_POLL_INTERVAL = 4
 
 
 def _sb_setting(name: str, default):
@@ -60,6 +69,22 @@ def _try_solve_captcha(sb) -> str | None:
             except Exception as e:  # method may not apply to this captcha type
                 logger.info(f"{name}() did not apply: {e}")
     return None
+
+
+def _wait_out_challenge(sb, timeout: int = CHALLENGE_WAIT) -> str:
+    """Poll the page while a self-clearing challenge resolves, and return the
+    resulting HTML. Deliberately does NOT reload: the WAF challenge page reloads
+    itself once its JS has a token, and reloading underneath it throws away the
+    token it was about to get."""
+    html = sb.get_page_source()
+    waited = 0
+    while has_bot_detection(html) and waited < timeout:
+        sb.sleep(CHALLENGE_POLL_INTERVAL)
+        waited += CHALLENGE_POLL_INTERVAL
+        html = sb.get_page_source()
+        if not has_bot_detection(html):
+            logger.info(f"Challenge cleared on its own after {waited}s of waiting.")
+    return html
 
 
 def _build_chrome_kwargs(proxy_url: str | None) -> dict:
@@ -126,7 +151,9 @@ def get_html_seleniumbase(
     try:
         sb = sb_cdp.Chrome(url, **chrome_kwargs)
         sb.sleep(initial_wait)  # let a silent WAF challenge issue its token + reload
-        html = sb.get_page_source()
+        # Give a self-clearing challenge every chance to finish before we start
+        # poking at it — intervening early is what used to lose these pages.
+        html = _wait_out_challenge(sb)
 
         if has_bot_detection(html):
             # Try to clear the challenge. Each cycle: best-effort solve, wait for
@@ -137,8 +164,9 @@ def get_html_seleniumbase(
                     f"(attempt {solve_attempt}/{BOT_SOLVE_ATTEMPTS})..."
                 )
                 used = _try_solve_captcha(sb)
-                sb.sleep(8)  # give the challenge time to issue a token / redirect
-                html = sb.get_page_source()
+                # Wait it out again rather than sleeping a fixed 8s: a solve
+                # click often just kicks off another token round.
+                html = _wait_out_challenge(sb, timeout=16)
                 if not has_bot_detection(html):
                     logger.info(
                         f"Bot detection cleared after attempt {solve_attempt} "
