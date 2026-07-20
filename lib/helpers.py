@@ -1,3 +1,6 @@
+import random
+import re
+
 from lib.logger import get_logger
 
 logger = get_logger("helpers")
@@ -22,6 +25,35 @@ BOT_DETECTION_MARKERS = (
     "gleich geht",              # "Gleich geht's weiter" — silent WAF interstitial
     "just a moment...",         # Cloudflare interstitial title (block-only)
 )
+
+
+_PORT_RANGE_RE = re.compile(r":(\d+)-(\d+)(/?)$")
+
+
+def expand_proxy_url(proxy_url: str) -> str:
+    """Resolve a `host:START-END` port range down to one randomly picked port.
+
+    Residential providers (DataImpulse here) map each port in a range to an
+    independent *sticky* session — one exit IP, held for the life of the session
+    — while the base port rotates the IP on every single request. Rotation is
+    fatal against AWS WAF: the challenge issues a token bound to the client IP,
+    so if the token request and the retry leave via different IPs the token
+    never validates and the page loops through the interstitial forever.
+
+    Picking one port per process gives each run a fresh IP that then stays put
+    for the whole run, which is what the challenge needs to clear. A plain
+    `host:port` is returned unchanged.
+    """
+    match = _PORT_RANGE_RE.search(proxy_url)
+    if not match:
+        return proxy_url
+    start, end = int(match.group(1)), int(match.group(2))
+    if start > end:
+        start, end = end, start
+    port = random.randint(start, end)
+    expanded = proxy_url[: match.start()] + f":{port}" + match.group(3)
+    logger.info(f"Proxy sticky session: port {port} (from range {start}-{end})")
+    return expanded
 
 
 def redact_proxy(proxy_url: str) -> str:

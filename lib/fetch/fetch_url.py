@@ -19,7 +19,7 @@ import sys
 from datetime import datetime, timezone
 
 from lib.config import env_get
-from lib.helpers import has_bot_detection, redact_proxy
+from lib.helpers import expand_proxy_url, has_bot_detection, redact_proxy
 from lib.logger import get_logger
 
 logger = get_logger("fetch_url")
@@ -65,6 +65,7 @@ def main() -> int:
         if not proxy_url:
             logger.error("--use-proxy given but PROXY_URL is not set.")
             return 1
+        proxy_url = expand_proxy_url(proxy_url)
         logger.info(f"Using proxy {redact_proxy(proxy_url)}")
 
     os.makedirs(args.out_dir, exist_ok=True)
