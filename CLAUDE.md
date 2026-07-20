@@ -101,13 +101,29 @@ Method and `max_workers` per source in `config.json`.
 
 > **Requires the unbranded Chromium browser.** Every seleniumbase workflow runs `seleniumbase get chromium` before the script. If you add a new seleniumbase-based workflow, include that step.
 
-**Bot detection**: `helpers.has_bot_detection()` flags HTML shorter than 10K chars. On a hit, `_seleniumbase.py` waits + reloads (and best-effort `solve_captcha()`) up to `BOT_SOLVE_ATTEMPTS` (3) times, then `os._exit(42)`; the workflow auto-re-dispatches on a fresh runner IP. Note: `solve_captcha()` only handles Cloudflare Turnstile + reCAPTCHA — it is a **no-op against immoscout's AWS WAF interactive captcha**, which is unsolvable for free. The only win against that WAF is not being served the puzzle tier (better stealth and/or a residential IP).
+**Bot detection**: `helpers.has_bot_detection()` flags HTML shorter than 10K chars, or containing a block-page text marker (`"ich bin kein roboter"`, `"gleich geht"`, `"just a moment..."`). Markers must be page *text*, never script includes — immoscout embeds the awswaf SDK on real search pages, so matching on `sdk.awswaf.com` rejected fully-loaded 842K result pages. On a hit, `_seleniumbase.py` waits the challenge out (see below), then escalates to solve+reload up to `BOT_SOLVE_ATTEMPTS` (3) times, then `os._exit(42)`; the workflow auto-re-dispatches. Note: `solve_captcha()` only handles Cloudflare Turnstile + reCAPTCHA — it is a **no-op against immoscout's AWS WAF interactive captcha**, which is unsolvable for free. The win against that WAF is not being served the puzzle tier (residential exit IP → the silent, self-clearing tier instead).
 
-**Debugging fetches**: the **Test Fetch URL** workflow (`test_fetch.yaml`) / `python -m lib.fetch.fetch_url --url <URL> [--method seleniumbase|curl_cffi]` runs any URL through this same fetch layer and reports HTML length, page title, bot-detection flag, plus the raw HTML + a screenshot (uploaded as a CI artifact). Use it to A/B stealth changes on a real runner IP without touching the live finder/scraper.
+**Waiting out the WAF challenge**: from a residential IP immoscout serves the *self-clearing* "Gleich geht's weiter" interstitial. Its JS polls for a token every 200 ms for ~10 s and then reloads itself, so `_seleniumbase.py` waits `initial_wait` (12 s) and then polls up to `CHALLENGE_WAIT` (40 s) **without reloading** — reloading restarts the token clock and is how these pages used to get lost.
 
-**GCP Proxy**: `FirewallManager` in `lib/proxy.py` auto-whitelists runner IP against GCP firewall. Cleanup via `atexit`. Only active when `use_proxy=True`.
+**Debugging fetches**: the **Test Fetch URL** workflow (`test_fetch.yaml`) / `python -m lib.fetch.fetch_url --url <URL> [--method seleniumbase|curl_cffi] [--use-proxy]` runs any URL through this same fetch layer and reports HTML length, page title, proxy, bot-detection flag, plus the raw HTML + a screenshot (uploaded as a CI artifact). Use it to A/B stealth changes on a real runner IP without touching the live finder/scraper.
 
-**Constraint**: No residential/paid proxies — rely on GitHub Actions IP rotation.
+## Proxy
+
+Off by default; a runtime choice, not a code change. `config.resolve_proxy(stage, source)` resolves it:
+
+| Input | Effect |
+|-------|--------|
+| `USE_PROXY` env | Workflow-level switch; overrides config when set |
+| `config.<stage>.<source>.use_proxy` | Fallback when `USE_PROXY` is unset (all `false`) |
+| `PROXY_URL__<SOURCE>` → `PROXY_URL` | Where the URL comes from |
+
+`use_proxy: true` on `test_fetch` / `immoscout_find` / `immoscout_scrape` sets `USE_PROXY`; the bot-detection retry passes the choice forward. Credentials are redacted (`redact_proxy`) everywhere they could reach a log — **this repo is public**.
+
+**Sticky sessions are mandatory against AWS WAF.** The WAF token is bound to the client IP, so a rotating exit IP can never satisfy the challenge (the page just cycles 1001 → 3979 → 4051 bytes forever). DataImpulse maps ports `10000-10999` to independent sticky sessions; `PROXY_URL` holds the **range** (`gw.dataimpulse.com:10000-10999`) and `helpers.expand_proxy_url()` picks one port per process — a fresh IP per run that stays put while the challenge clears. Rotating port 823 does not work.
+
+**Authenticated proxies force incognito off**: SeleniumBase supplies proxy credentials through a generated Chrome extension, and Chrome does not load extensions into incognito windows.
+
+**GCP Proxy** (legacy, unused): `FirewallManager` in `lib/proxy.py` allow-lists the runner IP against a GCP firewall. Now opt-in via `PROXY_MANAGE_FIREWALL=true` — third-party proxies need no allow-listing and it throws without GCP credentials present.
 
 ## Config Loading
 
@@ -122,13 +138,13 @@ Local: both files at repo root. GitHub Actions: `CONFIG_FILE` variable + secrets
 7 workflows in `.github/workflows/`:
 - **Finders** (3): every 12h (`0 */12 * * *`)
 - **Scrapers** (3): Kleinanzeigen every 6h (`0 */6 * * *`), Immoscout/Immowelt every 2h (`0 */2 * * *`)
-- **Test Fetch URL** (`test_fetch.yaml`): manual only — fetch one URL via the shared fetch layer, upload HTML + screenshot artifact. Needs only `CONFIG_FILE` (no DB/proxy secrets).
+- **Test Fetch URL** (`test_fetch.yaml`): manual only — fetch one URL via the shared fetch layer, upload HTML + screenshot artifact. Needs `CONFIG_FILE`, plus `PROXY_URL` when run with `use_proxy: true` (no DB secrets).
 - All support manual `workflow_dispatch`
 - Every **seleniumbase** workflow (immoscout/immowelt find+scrape, test_fetch) runs `seleniumbase get chromium` after installing deps.
 
 The daily report email lives in the separate [`reporter`](../reporter/) service.
 
-Secrets: `DATABASE__*`, `PROXY_URL__*`, `GCP_SERVICE_ACCOUNT_JSON`  
+Secrets: `DATABASE__*`, `PROXY_URL` (shared, sticky port range), `PROXY_URL__*` (legacy per-source GCP), `GCP_SERVICE_ACCOUNT_JSON`  
 Variable: `CONFIG_FILE` (full JSON content of `config.json`)
 
 ## Rules
