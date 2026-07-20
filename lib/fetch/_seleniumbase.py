@@ -46,6 +46,13 @@ DEFAULT_INITIAL_WAIT = 12
 # How long to let a challenge resolve on its own, and how often to re-check.
 CHALLENGE_WAIT = 40
 CHALLENGE_POLL_INTERVAL = 4
+# Clearing the challenge drops us onto the page mid-render: immoscout serves an
+# SSR shell (~37K, IS24.expose present but no #is24-content) and hydrates the
+# rest in. Capturing there passes bot detection but loses the content the
+# parsers need, which is what "cleared ... then Failed page N" was. So after the
+# challenge, poll until the DOM stops growing.
+SETTLE_MAX_WAIT = 20
+SETTLE_POLL_INTERVAL = 2
 
 
 def _sb_setting(name: str, default):
@@ -84,6 +91,21 @@ def _wait_out_challenge(sb, timeout: int = CHALLENGE_WAIT) -> str:
         html = sb.get_page_source()
         if not has_bot_detection(html):
             logger.info(f"Challenge cleared on its own after {waited}s of waiting.")
+    return html
+
+
+def _wait_for_render(sb, html: str, max_wait: int = SETTLE_MAX_WAIT) -> str:
+    """Poll until the page stops growing, so we capture the hydrated DOM rather
+    than the SSR shell the challenge drops us onto. Returns the settled HTML."""
+    waited = 0
+    while waited < max_wait:
+        sb.sleep(SETTLE_POLL_INTERVAL)
+        waited += SETTLE_POLL_INTERVAL
+        latest = sb.get_page_source()
+        if len(latest) == len(html):
+            return latest  # two identical readings — rendering has stopped
+        html = latest
+    logger.info(f"Page still growing after {max_wait}s; using it as-is ({len(html)} chars).")
     return html
 
 
@@ -154,6 +176,8 @@ def get_html_seleniumbase(
         # Give a self-clearing challenge every chance to finish before we start
         # poking at it — intervening early is what used to lose these pages.
         html = _wait_out_challenge(sb)
+        if not has_bot_detection(html):
+            html = _wait_for_render(sb, html)
 
         if has_bot_detection(html):
             # Try to clear the challenge. Each cycle: best-effort solve, wait for
@@ -172,6 +196,7 @@ def get_html_seleniumbase(
                         f"Bot detection cleared after attempt {solve_attempt} "
                         f"(method: {used or 'wait-only'})."
                     )
+                    html = _wait_for_render(sb, html)
                     break
 
                 sb.reload(ignore_cache=True)
@@ -179,6 +204,7 @@ def get_html_seleniumbase(
                 html = sb.get_page_source()
                 if not has_bot_detection(html):
                     logger.info(f"Bot detection cleared after reload (attempt {solve_attempt}).")
+                    html = _wait_for_render(sb, html)
                     break
             else:
                 if screenshot_path:
