@@ -18,7 +18,8 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from lib.helpers import has_bot_detection
+from lib.config import env_get
+from lib.helpers import has_bot_detection, redact_proxy
 from lib.logger import get_logger
 
 logger = get_logger("fetch_url")
@@ -48,7 +49,21 @@ def main() -> int:
         help="Folder for the saved HTML + screenshot (default: test_output)",
     )
     parser.add_argument("--proxy-url", default=None, help="Optional proxy (host:port or scheme://...)")
+    parser.add_argument(
+        "--use-proxy",
+        action="store_true",
+        help="Read the proxy from PROXY_URL__IMMOSCOUT / PROXY_URL instead of --proxy-url. "
+             "Preferred in CI: keeps the credentials out of the command line (and the log).",
+    )
     args = parser.parse_args()
+
+    proxy_url = args.proxy_url
+    if args.use_proxy and not proxy_url:
+        proxy_url = env_get("PROXY_URL__IMMOSCOUT") or env_get("PROXY_URL")
+        if not proxy_url:
+            logger.error("--use-proxy given but neither PROXY_URL__IMMOSCOUT nor PROXY_URL is set.")
+            return 1
+        logger.info(f"Using proxy {redact_proxy(proxy_url)}")
 
     os.makedirs(args.out_dir, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

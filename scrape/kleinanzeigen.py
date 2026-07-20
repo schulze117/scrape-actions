@@ -4,7 +4,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup, Tag
 
-from lib.config import get_config, get_env
+from lib.config import get_config, resolve_proxy
 from lib.exceptions import ElementDisabledError, ElementNotFoundError, NotBeautifulSoupError
 from lib.models import ListingSource, NextListingModel
 from .base import BaseScraper
@@ -17,9 +17,7 @@ class KleinanzeigenScraper(BaseScraper):
 
     def __init__(self):
         method = config.scrape.kleinanzeigen.method
-        use_proxy = config.scrape.kleinanzeigen.use_proxy
-        proxy_url = getattr(get_env(), "PROXY_URL__KLEINANZEIGEN", None) if use_proxy else None
-        super().__init__(source=ListingSource.KLEINANZEIGEN, method=method, proxy_url=proxy_url)
+        super().__init__(source=ListingSource.KLEINANZEIGEN, method=method, proxy_url=resolve_proxy("scrape", "kleinanzeigen"))
 
     def build_url(self, external_id: str) -> str:
         return f"{self.BASE_URL}/s-anzeige/{external_id}"

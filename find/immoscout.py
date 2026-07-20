@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Any
 from bs4 import BeautifulSoup, Tag
-from lib.config import get_config, get_env
+from lib.config import get_config, resolve_proxy
 from lib.models import IMMOSCOUT_SEARCH_CATEGORIES, ListingSource, NewListing
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
 from .base import BaseFinder
@@ -31,9 +31,7 @@ class ImmoscoutFinder(BaseFinder):
 
     def __init__(self):
         method = config.find.immoscout.method
-        use_proxy = config.find.immoscout.use_proxy
-        proxy_url = getattr(get_env(), "PROXY_URL__IMMOSCOUT", None) if use_proxy else None
-        super().__init__(method=method, proxy_url=proxy_url)
+        super().__init__(method=method, proxy_url=resolve_proxy("find", "immoscout"))
 
     def get_categories(self):
         return IMMOSCOUT_SEARCH_CATEGORIES.items()

@@ -64,8 +64,18 @@ def _try_solve_captcha(sb) -> str | None:
 
 def _build_chrome_kwargs(proxy_url: str | None) -> dict:
     """Assemble the sb_cdp.Chrome() kwargs from config with hard-case defaults."""
+    incognito = _sb_setting("incognito", True)
+    # An authenticated proxy ("user:pass@host:port") is handled by seleniumbase
+    # via a generated Chrome extension that supplies the credentials. Chrome does
+    # not load extensions into incognito windows, so keeping incognito on here
+    # means the proxy silently fails to authenticate. Incognito loses.
+    if proxy_url and "@" in proxy_url and incognito:
+        logger.info("Authenticated proxy in use — disabling incognito so the "
+                    "proxy-auth extension loads.")
+        incognito = False
+
     kwargs: dict = {
-        "incognito": _sb_setting("incognito", True),
+        "incognito": incognito,
         "lang": _sb_setting("lang", _sb_setting("locale", DEFAULT_LANG)),
     }
     # Unbranded Chromium (mdmintz: most stealthy for the hardest cases).

@@ -1,5 +1,5 @@
 from bs4 import BeautifulSoup, Tag
-from lib.config import get_config, get_env
+from lib.config import get_config, resolve_proxy
 from lib.database import Database
 from lib.models import KLEINANZEIGEN_SEARCH_CATEGORIES, ListingSource, NewListing
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
@@ -14,9 +14,7 @@ class KleinanzeigenFinder(BaseFinder):
 
     def __init__(self):
         method = config.find.kleinanzeigen.method
-        use_proxy = config.find.kleinanzeigen.use_proxy
-        proxy_url = getattr(get_env(), "PROXY_URL__KLEINANZEIGEN", None) if use_proxy else None
-        super().__init__(method=method, proxy_url=proxy_url)
+        super().__init__(method=method, proxy_url=resolve_proxy("find", "kleinanzeigen"))
 
     def get_categories(self):
         return KLEINANZEIGEN_SEARCH_CATEGORIES.items()

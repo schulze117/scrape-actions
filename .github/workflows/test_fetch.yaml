@@ -27,6 +27,11 @@ on:
           - ubuntu-latest
           - ubuntu-24.04-arm
           - windows-latest
+      use_proxy:
+        description: 'Route the fetch through the PROXY_URL secret (residential exit IP)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -64,12 +69,18 @@ jobs:
           CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
         run: echo "$CONFIG_JSON_CONTENT" > config.json
 
+      # The proxy comes in as an env var, never as a CLI arg — argv shows up in
+      # the run log. --use-proxy makes fetch_url read PROXY_URL itself.
       - name: Fetch the URL
         id: fetch
         continue-on-error: true
+        env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
         run: |
           set +e
-          python -m lib.fetch.fetch_url --url "${{ inputs.url }}" --method "${{ inputs.method }}" --out-dir test_output
+          PROXY_FLAG=""
+          if [ "${{ inputs.use_proxy }}" = "true" ]; then PROXY_FLAG="--use-proxy"; fi
+          python -m lib.fetch.fetch_url --url "${{ inputs.url }}" --method "${{ inputs.method }}" --out-dir test_output $PROXY_FLAG
           echo "exit_code=$?" >> $GITHUB_OUTPUT
 
       - name: Upload result (HTML + screenshot)

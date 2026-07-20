@@ -19,6 +19,13 @@ BOT_DETECTION_MARKERS = (
 )
 
 
+def redact_proxy(proxy_url: str) -> str:
+    """Strip proxy credentials before logging. This repo is public — Action logs
+    must never carry the user:pass part of a proxy string."""
+    host = proxy_url.rsplit("@", 1)[-1]
+    return f"***@{host}" if "@" in proxy_url else host
+
+
 def has_bot_detection(html: str, threshold: int = BOT_DETECTION_CHAR_THRESHOLD) -> bool:
     """
     Return True if the HTML looks like a bot/captcha verification page instead of

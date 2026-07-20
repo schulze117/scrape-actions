@@ -9,6 +9,11 @@ on:
         description: 'Bot detection retry attempt'
         required: false
         default: '0'
+      use_proxy:
+        description: 'Route requests through the PROXY_URL secret (residential exit IP)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -17,6 +22,11 @@ permissions:
 jobs:
   run-script:
     runs-on: ubuntu-latest
+
+    # Empty on scheduled runs, which leaves resolve_proxy() falling back to
+    # config.scrape.immoscout.use_proxy (false) — i.e. no proxy unless asked for.
+    env:
+      USE_PROXY: ${{ inputs.use_proxy }}
 
     steps:
       - name: Checkout code
@@ -45,7 +55,7 @@ jobs:
           echo "DATABASE__NAME=${{ secrets.DATABASE__NAME }}" >> .env
           echo "DATABASE__PASSWORD=${{ secrets.DATABASE__PASSWORD }}" >> .env
           echo "DATABASE__PORT=${{ secrets.DATABASE__PORT }}" >> .env
-          echo "PROXY_URL__IMMOSCOUT=${{ secrets.PROXY_URL__IMMOSCOUT }}" >> .env
+          echo "PROXY_URL=${{ secrets.PROXY_URL }}" >> .env
 
       - name: Create Service Account JSON
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}' > immofinder-438008-411bf1440a6c.json
@@ -67,6 +77,10 @@ jobs:
         run: |
           RETRY="${{ inputs.retry_count }}"
           RETRY=${RETRY:-0}
+          # Carry the proxy choice into the retry, else a proxied run would
+          # silently fall back to a direct (blocked) fetch on the next attempt.
+          USE_PROXY="${{ inputs.use_proxy }}"
+          USE_PROXY=${USE_PROXY:-false}
           MAX=15
           if [ "$RETRY" -lt "$MAX" ]; then
             echo "Bot detected (attempt $((RETRY+1))/$MAX). Dispatching retry with new IP..."
@@ -76,7 +90,7 @@ jobs:
               -H "Authorization: Bearer $GITHUB_TOKEN" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "https://api.github.com/repos/${{ github.repository }}/actions/workflows/immoscout_scrape.yaml/dispatches" \
-              -d "{\"ref\":\"main\",\"inputs\":{\"retry_count\":\"$((RETRY+1))\"}}")
+              -d "{\"ref\":\"main\",\"inputs\":{\"retry_count\":\"$((RETRY+1))\",\"use_proxy\":\"$USE_PROXY\"}}")
             echo "API response: $STATUS"
             [ "$STATUS" = "204" ] || exit 1
           else

@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup, Tag
 from lzstring import LZString
 
 from lib.logger import get_logger
-from lib.config import get_config, get_env
+from lib.config import get_config, resolve_proxy
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
 from lib.models import IMMOWELT_SEARCH_CATEGORIES, ListingSource, NewListing
 from .base import BaseFinder
@@ -24,9 +24,7 @@ class ImmoweltFinder(BaseFinder):
 
     def __init__(self):
         method = config.find.immowelt.method
-        use_proxy = config.find.immowelt.use_proxy
-        proxy_url = getattr(get_env(), "PROXY_URL__IMMOWELT", None) if use_proxy else None
-        super().__init__(method=method, proxy_url=proxy_url)
+        super().__init__(method=method, proxy_url=resolve_proxy("find", "immowelt"))
 
     def get_categories(self):
         return IMMOWELT_SEARCH_CATEGORIES.items()
