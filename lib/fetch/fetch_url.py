@@ -52,16 +52,18 @@ def main() -> int:
     parser.add_argument(
         "--use-proxy",
         action="store_true",
-        help="Read the proxy from PROXY_URL__IMMOSCOUT / PROXY_URL instead of --proxy-url. "
+        help="Read the proxy from the PROXY_URL env var instead of --proxy-url. "
              "Preferred in CI: keeps the credentials out of the command line (and the log).",
     )
     args = parser.parse_args()
 
     proxy_url = args.proxy_url
     if args.use_proxy and not proxy_url:
-        proxy_url = env_get("PROXY_URL__IMMOSCOUT") or env_get("PROXY_URL")
+        # Shared PROXY_URL first: this is a generic URL tester, not tied to one
+        # source, so a stale per-source value shouldn't quietly win.
+        proxy_url = env_get("PROXY_URL")
         if not proxy_url:
-            logger.error("--use-proxy given but neither PROXY_URL__IMMOSCOUT nor PROXY_URL is set.")
+            logger.error("--use-proxy given but PROXY_URL is not set.")
             return 1
         logger.info(f"Using proxy {redact_proxy(proxy_url)}")
 
@@ -79,12 +81,12 @@ def main() -> int:
             from lib.fetch._seleniumbase import get_html_seleniumbase
 
             html = get_html_seleniumbase(
-                args.url, proxy_url=args.proxy_url, screenshot_path=shot_path
+                args.url, proxy_url=proxy_url, screenshot_path=shot_path
             )
         else:
             from lib.fetch._curl_cffi import get_html_curlcffi
 
-            html = get_html_curlcffi(args.url, proxy_url=args.proxy_url)
+            html = get_html_curlcffi(args.url, proxy_url=proxy_url)
     except SystemExit as e:
         # get_html_seleniumbase does os._exit(42) on persistent bot detection,
         # which raises SystemExit before this normally; guard just in case.
@@ -99,6 +101,7 @@ def main() -> int:
     summary_lines = [
         f"URL:            {args.url}",
         f"Method:         {args.method}",
+        f"Proxy:          {redact_proxy(proxy_url) if proxy_url else '(none — direct)'}",
         f"HTML length:    {len(html):,} chars",
         f"Page title:     {title or '(none)'}",
         f"Bot detection:  {'YES (looks blocked)' if bot else 'no (looks OK)'}",

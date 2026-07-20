@@ -3,6 +3,7 @@ import logging
 from curl_cffi import requests
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from lib.config import get_config
+from lib.helpers import redact_proxy
 from lib.logger import get_logger
 
 config = get_config()
@@ -30,7 +31,10 @@ def get_html_curlcffi(url: str, proxy_url: str | None = None) -> str:
             raise RuntimeError(f"Failed to fetch {url}: Status code {response.status_code}")
         return response.text
     except Exception as e:
-        raise RuntimeError(f"Failed to fetch {url} with proxy {proxy_url or 'None'}: {e}")
+        # Never interpolate the raw proxy_url here — it carries credentials and
+        # this repo's Action logs are public.
+        proxy_desc = redact_proxy(proxy_url) if proxy_url else "None"
+        raise RuntimeError(f"Failed to fetch {url} with proxy {proxy_desc}: {e}")
 
 # test fetch_html
 if __name__ == "__main__":
