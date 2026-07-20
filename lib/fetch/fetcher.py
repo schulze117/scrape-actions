@@ -6,7 +6,7 @@ from lib.fetch._seleniumbase import get_html_seleniumbase
 from lib.proxy import FirewallManager
 
 from lib.config import get_config, env_bool
-from lib.helpers import redact_proxy
+from lib.helpers import expand_proxy_url, redact_proxy
 from lib.logger import get_logger
 
 config = get_config()
@@ -42,16 +42,22 @@ class Fetcher:
         """
         Determines proxy, selects method, and returns HTML string.
         """
-        
+        # Draw a fresh sticky session per fetch. The session must hold still for
+        # the duration of one page (the WAF token is bound to the exit IP), but
+        # pinning the whole run to a single IP means one bad draw stalls every
+        # remaining page — a scrape run sat on 0/8 listings for 40 minutes that
+        # way. Per fetch: stable where it matters, self-healing across pages.
+        proxy_url = expand_proxy_url(self.proxy_url) if self.proxy_url else None
+
         if self.method == "curl_cffi":
-            return get_html_curlcffi(url, proxy_url=self.proxy_url)
-            
+            return get_html_curlcffi(url, proxy_url=proxy_url)
+
         elif self.method == "playwright":
             # return get_html_playwright(url, proxy_url=proxy_url)
             raise NotImplementedError("Playwright fetcher is not yet implemented.")
-            
+
         elif self.method == "seleniumbase":
-            return get_html_seleniumbase(url, proxy_url=self.proxy_url)
-            
+            return get_html_seleniumbase(url, proxy_url=proxy_url)
+
         else:
             raise ValueError(f"Unknown fetching method in config: {self.method}")

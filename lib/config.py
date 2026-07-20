@@ -85,9 +85,9 @@ def resolve_proxy(stage: str, source: str) -> str | None:
         )
         return None
 
-    from lib.helpers import expand_proxy_url  # local import: helpers imports logger
-
-    return expand_proxy_url(proxy_url)
+    # Returned with any sticky port range intact — Fetcher expands it per fetch,
+    # so each page gets its own session rather than the whole run sharing one IP.
+    return proxy_url
 
 
 # Example usage if the file is called directly
