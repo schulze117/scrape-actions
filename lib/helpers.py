@@ -10,11 +10,16 @@ BOT_DETECTION_CHAR_THRESHOLD = 10_000
 # those load on normal pages of sites that use them, so they aren't block-only.)
 # Needed because a *rendered* interactive captcha page (e.g. immoscout's AWS WAF
 # image puzzle) balloons past the length threshold and would otherwise slip through.
+#
+# These are page *text*, not script includes. The awswaf SDK <script> tags used
+# to be listed here and turned out not to be block-only: immoscout embeds the
+# WAF SDK on real search pages too (to refresh its token), so a fully-loaded
+# 842K result page was being rejected as a block page — the finder fetched real
+# listings and threw them away. The block page, silent or interactive, always
+# carries the title/heading below.
 BOT_DETECTION_MARKERS = (
-    "captcha-sdk.awswaf.com",   # AWS WAF captcha SDK (immoscout)
-    "sdk.awswaf.com",           # AWS WAF challenge SDK
-    "awswafcaptcha",            # <awswaf-captcha> widget / AwsWafCaptcha API
-    "ich bin kein roboter",     # immoscout AWS WAF block-page title
+    "ich bin kein roboter",     # immoscout AWS WAF block-page title (both tiers)
+    "gleich geht",              # "Gleich geht's weiter" — silent WAF interstitial
     "just a moment...",         # Cloudflare interstitial title (block-only)
 )
 
