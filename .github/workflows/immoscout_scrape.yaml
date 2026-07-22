@@ -5,26 +5,22 @@ on:
      - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
-      retry_count:
-        description: 'Bot detection retry attempt'
-        required: false
-        default: '0'
       use_proxy:
-        description: 'Route requests through the PROXY_URL secret (residential exit IP)'
+        description: 'Route through the AI-server proxy over Tailscale (set false to force a direct, unproxied run)'
         required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
-    # Empty on scheduled runs, which leaves resolve_proxy() falling back to
-    # config.scrape.immoscout.use_proxy (false) — i.e. no proxy unless asked for.
+    # Empty on scheduled runs -> resolve_proxy() falls back to
+    # config.scrape.immoscout.use_proxy (true) -> proxy on. A manual dispatch with
+    # use_proxy=false forces a direct run (only useful for A/B testing the WAF).
     env:
       USE_PROXY: ${{ inputs.use_proxy }}
 
@@ -42,6 +38,18 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # Immoscout is fetched through the AI server (residential IP) to clear the
+      # AWS WAF. The runner joins the tailnet and reaches the proxy privately at
+      # 100.88.231.47:8888 (= PROXY_URL). The node is ephemeral, so it removes
+      # itself when the job ends — nothing accumulates. Skipped only for an
+      # explicit direct run.
+      - name: Connect to Tailscale
+        if: ${{ inputs.use_proxy != 'false' }}
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          hostname: gha-immoscout-scrape
+
       - name: Create config.json
         env:
           CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
@@ -57,47 +65,5 @@ jobs:
           echo "DATABASE__PORT=${{ secrets.DATABASE__PORT }}" >> .env
           echo "PROXY_URL=${{ secrets.PROXY_URL }}" >> .env
 
-      - name: Create Service Account JSON
-        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}' > immofinder-438008-411bf1440a6c.json
-
       - name: Run Immoscout Scraper
-        id: run
-        continue-on-error: true
-        run: |
-          set +e
-          python -m scrape.immoscout
-          EXIT_CODE=$?
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
-          exit $EXIT_CODE
-
-      - name: Retry on bot detection
-        if: steps.run.outputs.exit_code == '42'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          RETRY="${{ inputs.retry_count }}"
-          RETRY=${RETRY:-0}
-          # Carry the proxy choice into the retry, else a proxied run would
-          # silently fall back to a direct (blocked) fetch on the next attempt.
-          USE_PROXY="${{ inputs.use_proxy }}"
-          USE_PROXY=${USE_PROXY:-false}
-          MAX=15
-          if [ "$RETRY" -lt "$MAX" ]; then
-            echo "Bot detected (attempt $((RETRY+1))/$MAX). Dispatching retry with new IP..."
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/immoscout_scrape.yaml/dispatches" \
-              -d "{\"ref\":\"main\",\"inputs\":{\"retry_count\":\"$((RETRY+1))\",\"use_proxy\":\"$USE_PROXY\"}}")
-            echo "API response: $STATUS"
-            [ "$STATUS" = "204" ] || exit 1
-          else
-            echo "Max retries ($MAX) reached."
-            exit 1
-          fi
-
-      - name: Fail on non-bot errors
-        if: steps.run.outcome == 'failure' && steps.run.outputs.exit_code != '42'
-        run: exit 1
+        run: python -m scrape.immoscout

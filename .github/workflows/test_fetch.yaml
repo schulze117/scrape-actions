@@ -64,6 +64,15 @@ jobs:
         if: ${{ contains(inputs.runner, 'arm') }}
         run: sudo apt-get update && sudo apt-get install -y chromium
 
+      # When proxying, join the tailnet so the runner can reach the AI-server
+      # proxy (PROXY_URL = 100.88.231.47:8888) privately over Tailscale.
+      - name: Connect to Tailscale
+        if: ${{ inputs.use_proxy }}
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          hostname: gha-test-fetch
+
       - name: Create config.json
         env:
           CONFIG_JSON_CONTENT: ${{ vars.CONFIG_FILE }}
