@@ -38,9 +38,13 @@ class Fetcher:
         elif self.proxy_url:
             logger.info(f"Using proxy {redact_proxy(self.proxy_url)}")
 
-    def fetch(self, url: str) -> str:
+    def fetch(self, url: str, ready_marker: str | None = None) -> str:
         """
         Determines proxy, selects method, and returns HTML string.
+
+        `ready_marker`: a string that only the fully-rendered page contains
+        (e.g. "IS24.resultList"). The browser fetcher waits for it before
+        capturing, so we don't grab the SSR shell. Ignored by curl_cffi (no JS).
         """
         # Draw a fresh sticky session per fetch. The session must hold still for
         # the duration of one page (the WAF token is bound to the exit IP), but
@@ -57,7 +61,7 @@ class Fetcher:
             raise NotImplementedError("Playwright fetcher is not yet implemented.")
 
         elif self.method == "seleniumbase":
-            return get_html_seleniumbase(url, proxy_url=proxy_url)
+            return get_html_seleniumbase(url, proxy_url=proxy_url, ready_marker=ready_marker)
 
         else:
             raise ValueError(f"Unknown fetching method in config: {self.method}")

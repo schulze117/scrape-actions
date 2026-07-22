@@ -18,6 +18,9 @@ class BaseScraper(ABC):
     # When True: only re-scrape if modified_at > last_scraped_at (Immowelt, Immoscout)
     # When False: re-scrape any listing older than 12h (Kleinanzeigen — no modified_at updates)
     RESCRAPE_ON_MODIFIED_ONLY = False
+    # A string only the fully-rendered page contains; the browser fetcher waits
+    # for it so we don't capture the pre-hydration shell. None = no wait (curl).
+    READY_MARKER: str | None = None
 
     def __init__(self, source: ListingSource, method: str, proxy_url: str | None):
         self.source = source
@@ -75,7 +78,7 @@ class BaseScraper(ABC):
         url = self.build_url(listing.external_id)
         prefix = f"{listing.id}  {url}"
         try:
-            html = self.fetcher.fetch(url)
+            html = self.fetcher.fetch(url, ready_marker=self.READY_MARKER)
             soup = BeautifulSoup(html, "lxml")
 
             minified_html = self.get_minified_html(soup)

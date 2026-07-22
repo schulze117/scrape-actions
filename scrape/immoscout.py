@@ -26,6 +26,10 @@ class ImmoscoutScraper(BaseScraper):
 
     # Only re-scrape when the listing has been modified since last scrape
     RESCRAPE_ON_MODIFIED_ONLY = True
+    # After the WAF challenge clears, wait until the expose JSON is in the page
+    # (hydrates in after the SSR shell) before capturing — see get_json_data,
+    # which parses IS24.expose.
+    READY_MARKER = "IS24.expose"
 
     def __init__(self):
         method = config.scrape.immoscout.method

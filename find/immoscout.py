@@ -28,6 +28,10 @@ def extract_listing_data(listing: dict[str, Any]) -> NewListing:
 class ImmoscoutFinder(BaseFinder):
     CONCURRENT_LOCATIONS = False
     BASE_URL = "https://www.immobilienscout24.de/Suche/shape"
+    # After the WAF challenge clears, wait until the results JSON is actually in
+    # the page (it hydrates in after the SSR shell) before capturing — see
+    # get_json_data, which parses IS24.resultList.
+    READY_MARKER = "IS24.resultList"
 
     def __init__(self):
         method = config.find.immoscout.method

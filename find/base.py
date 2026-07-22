@@ -11,8 +11,11 @@ class BaseFinder(ABC):
     # Default behavior: Process locations sequentially (safer for tough sites like Immoscout)
     CONCURRENT_LOCATIONS = False
     CONCURRENT_PAGES = True
-    
-    def __init__(self, method: str, proxy_url: str | None): 
+    # A string only the fully-rendered page contains; the browser fetcher waits
+    # for it so we don't capture the pre-hydration shell. None = no wait (curl).
+    READY_MARKER: str | None = None
+
+    def __init__(self, method: str, proxy_url: str | None):
         self.config = get_config()
         self.logger = get_logger(self.__class__.__name__)
         self.db = Database()
@@ -23,7 +26,7 @@ class BaseFinder(ABC):
         self.max_workers = method_config.max_workers
         
     def fetch_html(self, url: str) -> str:
-        return self.fetcher.fetch(url)
+        return self.fetcher.fetch(url, ready_marker=self.READY_MARKER)
 
     def run(self):
         """
@@ -81,7 +84,7 @@ class BaseFinder(ABC):
         
         try:
             # use the fetcher class to get the HTML.
-            html = self.fetcher.fetch(url)
+            html = self.fetcher.fetch(url, ready_marker=self.READY_MARKER)
             soup = BeautifulSoup(html, "lxml")
             
             # Get listings and save

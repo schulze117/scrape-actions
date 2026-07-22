@@ -53,6 +53,13 @@ CHALLENGE_POLL_INTERVAL = 4
 # challenge, poll until the DOM stops growing.
 SETTLE_MAX_WAIT = 20
 SETTLE_POLL_INTERVAL = 2
+# Size-settle alone isn't enough: the shell is briefly stable before the SPA
+# swaps in the real content, so two equal reads can land on the shell (seen as
+# "cleared ... then Failed page N: Script tag not found", worse on higher-latency
+# proxied paths). When the caller knows a string only the finished page contains
+# (IS24.resultList for search, IS24.expose for an expose), wait for THAT instead.
+CONTENT_MAX_WAIT = 30
+CONTENT_POLL_INTERVAL = 3
 
 
 def _sb_setting(name: str, default):
@@ -109,6 +116,33 @@ def _wait_for_render(sb, html: str, max_wait: int = SETTLE_MAX_WAIT) -> str:
     return html
 
 
+def _wait_for_content(sb, marker: str, html: str, max_wait: int = CONTENT_MAX_WAIT) -> str:
+    """Poll until `marker` appears — the reliable signal that the SPA has replaced
+    the SSR shell with the real content the parser needs. Returns the html once
+    the marker is present, or the last-seen html on timeout (parser then fails
+    and the caller logs it, same as before)."""
+    if marker in html:
+        return html
+    waited = 0
+    while waited < max_wait:
+        sb.sleep(CONTENT_POLL_INTERVAL)
+        waited += CONTENT_POLL_INTERVAL
+        html = sb.get_page_source()
+        if marker in html:
+            logger.info(f"Content marker present after {waited}s ({len(html)} chars).")
+            return html
+    logger.warning(f"Content marker '{marker}' not found after {max_wait}s; capturing anyway ({len(html)} chars).")
+    return html
+
+
+def _finalize_html(sb, html: str, ready_marker: str | None) -> str:
+    """After the challenge clears, capture the *complete* page: wait for the
+    caller's content marker if one was given, else fall back to size-settle."""
+    if ready_marker:
+        return _wait_for_content(sb, ready_marker, html)
+    return _wait_for_render(sb, html)
+
+
 def _build_chrome_kwargs(proxy_url: str | None) -> dict:
     """Assemble the sb_cdp.Chrome() kwargs from config with hard-case defaults."""
     incognito = _sb_setting("incognito", True)
@@ -157,6 +191,8 @@ def get_html_seleniumbase(
     proxy_url: str | None = None,
     timeout: int | None = None,
     screenshot_path: str | None = None,
+    exit_on_block: bool = True,
+    ready_marker: str | None = None,
 ) -> str:
     """Fetch a page with Pure CDP Mode (undetected Chromium) and return its HTML.
 
@@ -164,6 +200,11 @@ def get_html_seleniumbase(
     up to BOT_SOLVE_ATTEMPTS times, then os._exit(42) so the workflow re-dispatches
     on a fresh runner IP. `screenshot_path`, when given, saves a PNG of the final
     page — used by the lib.fetch.fetch_url test harness (no overhead in production).
+
+    `exit_on_block=False` turns off the os._exit(42): on a persistent block it
+    returns the (still-blocked) HTML instead, so a caller can judge it with
+    has_bot_detection() without the process dying. Used by the GCP-proxy probe,
+    which must survive a blocked proxy to move on to the next one.
     """
     timeout = timeout if timeout is not None else config.seleniumbase.timeout
     initial_wait = _sb_setting("initial_wait", DEFAULT_INITIAL_WAIT)
@@ -177,7 +218,7 @@ def get_html_seleniumbase(
         # poking at it — intervening early is what used to lose these pages.
         html = _wait_out_challenge(sb)
         if not has_bot_detection(html):
-            html = _wait_for_render(sb, html)
+            html = _finalize_html(sb, html, ready_marker)
 
         if has_bot_detection(html):
             # Try to clear the challenge. Each cycle: best-effort solve, wait for
@@ -196,7 +237,7 @@ def get_html_seleniumbase(
                         f"Bot detection cleared after attempt {solve_attempt} "
                         f"(method: {used or 'wait-only'})."
                     )
-                    html = _wait_for_render(sb, html)
+                    html = _finalize_html(sb, html, ready_marker)
                     break
 
                 sb.reload(ignore_cache=True)
@@ -204,7 +245,7 @@ def get_html_seleniumbase(
                 html = sb.get_page_source()
                 if not has_bot_detection(html):
                     logger.info(f"Bot detection cleared after reload (attempt {solve_attempt}).")
-                    html = _wait_for_render(sb, html)
+                    html = _finalize_html(sb, html, ready_marker)
                     break
             else:
                 if screenshot_path:
@@ -212,6 +253,12 @@ def get_html_seleniumbase(
                     # os._exit below kills the process before the caller can
                     # write anything, so persist the block-page HTML here too.
                     _save_html(html, os.path.splitext(screenshot_path)[0] + ".html")
+                if not exit_on_block:
+                    logger.warning(
+                        f"Bot detection persists for {url} after {BOT_SOLVE_ATTEMPTS} "
+                        f"attempts (len {len(html)}); returning blocked HTML (probe mode)."
+                    )
+                    return html
                 logger.error(
                     f"Bot detection persists after {BOT_SOLVE_ATTEMPTS} solve+reload attempts "
                     f"for {url}. HTML length: {len(html)}. Stopping program."
