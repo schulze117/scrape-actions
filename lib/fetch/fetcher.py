@@ -61,7 +61,12 @@ class Fetcher:
             raise NotImplementedError("Playwright fetcher is not yet implemented.")
 
         elif self.method == "seleniumbase":
-            return get_html_seleniumbase(url, proxy_url=proxy_url, ready_marker=ready_marker)
+            # exit_on_block=False: a blocked page must not os._exit and kill the
+            # whole finder/scraper run — it returns the blocked HTML, the parser
+            # fails, and the caller logs + skips that one page.
+            return get_html_seleniumbase(
+                url, proxy_url=proxy_url, ready_marker=ready_marker, exit_on_block=False
+            )
 
         else:
             raise ValueError(f"Unknown fetching method in config: {self.method}")

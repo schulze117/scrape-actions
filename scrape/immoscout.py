@@ -26,6 +26,9 @@ class ImmoscoutScraper(BaseScraper):
 
     # Only re-scrape when the listing has been modified since last scrape
     RESCRAPE_ON_MODIFIED_ONLY = True
+    # One browser at a time — serial is gentler on the single residential proxy
+    # and matches the finder. (max_workers=1 already made it serial; explicit here.)
+    CONCURRENT_LISTINGS = False
     # After the WAF challenge clears, wait until the expose JSON is in the page
     # (hydrates in after the SSR shell) before capturing — see get_json_data,
     # which parses IS24.expose.

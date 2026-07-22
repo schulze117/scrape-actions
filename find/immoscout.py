@@ -32,6 +32,10 @@ class ImmoscoutFinder(BaseFinder):
     # the page (it hydrates in after the SSR shell) before capturing — see
     # get_json_data, which parses IS24.resultList.
     READY_MARKER = "IS24.resultList"
+    # Newest-first, ~453 pages/category at ~30s each through the proxy — stop once
+    # a page has no new listings, and never crawl past MAX_PAGES as a safety net.
+    STOP_WHEN_NO_NEW = True
+    MAX_PAGES = 40
 
     def __init__(self):
         method = config.find.immoscout.method

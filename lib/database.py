@@ -273,10 +273,13 @@ class Database:
         return ids
 
     @db_operation_with_retry
-    def set_new_listing_data(self, listings: list[NewListing]) -> None:
+    def set_new_listing_data(self, listings: list[NewListing]) -> int:
+        """Upsert listings and return how many were genuinely NEW (not already in
+        the DB). The finder uses that count to stop paginating once a page has
+        nothing new (results are newest-first)."""
         if not listings:
             self.logger.debug("No listings to process")
-            return
+            return 0
 
         self.logger.debug(
             "Saving listings to DB: %s",
@@ -291,7 +294,15 @@ class Database:
             ]
         )
 
+        external_ids = [l.external_id for l in listings]
+        sources = [l.source.value for l in listings]
+
         with self._db() as (connection, cursor):
+            # Which of these already exist? (count new ones for the finder's early-stop)
+            cursor.execute(SELECT_PROPERTY_IDS_SQL, {"external_ids": external_ids, "sources": sources})
+            pre_existing = {row["external_id"] for row in cursor.fetchall()}
+            new_count = sum(1 for eid in external_ids if eid not in pre_existing)
+
             self.logger.debug(f"Batch setting property data for {len(listings)} listings")
             cursor.executemany(
                 SET_NEW_LISTING_DATA_SQL,
@@ -308,8 +319,6 @@ class Database:
 
             self.logger.debug(f"Selecting property IDs")
 
-            external_ids = [l.external_id for l in listings]
-            sources = [l.source.value for l in listings]
             cursor.execute(SELECT_PROPERTY_IDS_SQL, {"external_ids": external_ids, "sources": sources})
             results = cursor.fetchall()
             property_id_mapping: dict[str, str] = {row["external_id"]: row["id"] for row in results}
@@ -342,7 +351,8 @@ class Database:
             )
 
             connection.commit()
-            self.logger.debug(f"Batch listing data set for {len(listings)} listings")
+            self.logger.debug(f"Batch listing data set for {len(listings)} listings ({new_count} new)")
+            return new_count
 
     @db_operation_with_retry
     def get_next_listings(self, source: ListingSource, limit: int, rescrape_on_modified_only: bool = False) -> list[NextListingModel]:

@@ -14,6 +14,12 @@ class BaseFinder(ABC):
     # A string only the fully-rendered page contains; the browser fetcher waits
     # for it so we don't capture the pre-hydration shell. None = no wait (curl).
     READY_MARKER: str | None = None
+    # Results are newest-first, so once a page has zero new listings the deeper
+    # pages are all already known. When True, paginate sequentially and stop
+    # there (Immoscout: 453 pages/category at ~30s each is otherwise hours).
+    STOP_WHEN_NO_NEW: bool = False
+    # Hard safety cap on pages per location, whatever STOP_WHEN_NO_NEW decides.
+    MAX_PAGES: int | None = None
 
     def __init__(self, method: str, proxy_url: str | None):
         self.config = get_config()
@@ -63,49 +69,71 @@ class BaseFinder(ABC):
 
     def process_location(self, category, location):
         """Strategy for a single location."""
-        # 1. Process Page 1 and get total page count
-        pages_count = self.process_page_strategy(category, location, page=1)
-        
-        # 2. If more pages, process them concurrently
-        if pages_count > 1 and self.CONCURRENT_PAGES:
+        # 1. Process Page 1 and get total page count + how many were new
+        pages_count, new_count = self.process_page_strategy(category, location, page=1)
+
+        last_page = pages_count
+        if self.MAX_PAGES:
+            last_page = min(last_page, self.MAX_PAGES)
+        if last_page <= 1:
+            return
+
+        # 2a. Early-stop mode: walk pages in order, stop when one has no new
+        # listings (deeper pages are older, so all already known). A failed page
+        # (new_count is None) doesn't count as "no new" — keep going.
+        if self.STOP_WHEN_NO_NEW:
+            if new_count == 0:
+                return
+            for page in range(2, last_page + 1):
+                _, new_count = self.process_page_strategy(category, location, page)
+                if new_count == 0:
+                    self.logger.info(f"Early stop at page {page} for {location}: no new listings.")
+                    break
+            return
+
+        # 2b. Default: process the remaining pages concurrently
+        if self.CONCURRENT_PAGES:
             with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = [
                     executor.submit(self.process_page_strategy, category, location, page)
-                    for page in range(2, pages_count + 1)
+                    for page in range(2, last_page + 1)
                 ]
                 concurrent.futures.wait(futures)
 
-    def process_page_strategy(self, category, location, page) -> int:
+    def process_page_strategy(self, category, location, page) -> tuple[int, int | None]:
         """
         Builds URL, fetches HTML, parses listings, saves to DB.
-        Returns total pages count.
+        Returns (total pages count, number of NEW listings on this page).
+        new_count is None when the page failed — so early-stop won't mistake a
+        failed fetch for "no new listings".
         """
         url = self.build_url(category, location, page)
-        
+
         try:
             # use the fetcher class to get the HTML.
             html = self.fetcher.fetch(url, ready_marker=self.READY_MARKER)
             soup = BeautifulSoup(html, "lxml")
-            
+
             # Get listings and save
             listings = self.get_listings(soup)
             # This is also saving "alternative" listings. To avoide this dont save them if pages_count is 1
+            new_count = 0
             if listings:
-                self.db.set_new_listing_data(listings)
-            
+                new_count = self.db.set_new_listing_data(listings)
+
             # Get page count
             pages_count = self.get_pages_count(soup)
-            
+
             self.logger.info(
-                f"Listings: {len(listings):<3} \tPage: {page} of {pages_count}"
+                f"Listings: {len(listings):<3} (new: {new_count}) \tPage: {page} of {pages_count}"
                 # f"\tCategory {category} \tLocation {location}"
                 f"\tURL {url}"
             )
-            return pages_count
+            return pages_count, new_count
 
         except Exception as e:
             self.logger.error(f"Failed page {page} for {location} (URL: {url}): {e}")
-            return 0
+            return 0, None
 
     # --- Abstract Methods ---
 

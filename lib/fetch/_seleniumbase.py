@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 
 from seleniumbase import sb_cdp
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
@@ -60,6 +61,11 @@ SETTLE_POLL_INTERVAL = 2
 # (IS24.resultList for search, IS24.expose for an expose), wait for THAT instead.
 CONTENT_MAX_WAIT = 30
 CONTENT_POLL_INTERVAL = 3
+# Hard wall-clock cap on a single fetch attempt. A stalled proxied CDP call can
+# block forever; this must comfortably exceed the worst *legitimate* fetch
+# (launch + initial_wait + challenge + content-wait + escalation ≈ 160s) so it
+# only ever fires on a true hang. @retry may still retry after it.
+FETCH_HARD_TIMEOUT = 180
 
 
 def _sb_setting(name: str, default):
@@ -203,9 +209,54 @@ def get_html_seleniumbase(
 
     `exit_on_block=False` turns off the os._exit(42): on a persistent block it
     returns the (still-blocked) HTML instead, so a caller can judge it with
-    has_bot_detection() without the process dying. Used by the GCP-proxy probe,
-    which must survive a blocked proxy to move on to the next one.
+    has_bot_detection() without the process dying. Used by the pipeline (a blocked
+    page must not kill the run) and the GCP-proxy probe.
+
+    The actual work runs on a daemon thread with a hard wall-clock cap. A CDP call
+    (get_page_source/reload) can block forever when the proxied connection stalls
+    — that froze a scrape run for 54 minutes. On timeout we force-quit the browser
+    (which unblocks the stuck call) and raise so @retry can retry; a daemon thread
+    can't keep the process alive if the call never returns.
     """
+    holder: dict = {"sb": None}
+    box: dict = {}
+
+    def _worker():
+        try:
+            box["html"] = _fetch_body(
+                holder, url, proxy_url, timeout, screenshot_path, exit_on_block, ready_marker
+            )
+        except BaseException as e:  # noqa: BLE001 — surface any failure to the caller
+            box["error"] = e
+
+    t = threading.Thread(target=_worker, daemon=True, name="sb-fetch")
+    t.start()
+    t.join(FETCH_HARD_TIMEOUT)
+    if t.is_alive():
+        logger.error(f"Fetch stalled >{FETCH_HARD_TIMEOUT}s for {url}; force-quitting browser.")
+        sb = holder.get("sb")
+        if sb is not None:
+            try:
+                sb.quit()  # closing the browser unblocks the hung CDP call
+            except Exception:
+                pass
+        raise RuntimeError(f"Fetch stalled >{FETCH_HARD_TIMEOUT}s: {url}")
+    if "error" in box:
+        raise box["error"]
+    return box["html"]
+
+
+def _fetch_body(
+    holder: dict,
+    url: str,
+    proxy_url: str | None,
+    timeout: int | None,
+    screenshot_path: str | None,
+    exit_on_block: bool,
+    ready_marker: str | None,
+) -> str:
+    """The real fetch. Runs inside the timeout thread; publishes its browser to
+    `holder["sb"]` so the watchdog can force-quit it on a stall."""
     timeout = timeout if timeout is not None else config.seleniumbase.timeout
     initial_wait = _sb_setting("initial_wait", DEFAULT_INITIAL_WAIT)
     chrome_kwargs = _build_chrome_kwargs(proxy_url)
@@ -213,6 +264,7 @@ def get_html_seleniumbase(
     sb = None
     try:
         sb = sb_cdp.Chrome(url, **chrome_kwargs)
+        holder["sb"] = sb
         sb.sleep(initial_wait)  # let a silent WAF challenge issue its token + reload
         # Give a self-clearing challenge every chance to finish before we start
         # poking at it — intervening early is what used to lose these pages.
