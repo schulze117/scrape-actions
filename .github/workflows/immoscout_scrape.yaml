@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+# One scraper at a time. A backlog drain can run long; without this the every-2h
+# schedule would stack overlapping runs all hammering the one residential proxy.
+# New triggers queue (at most one pending) instead of cancelling the active run.
+concurrency:
+  group: immoscout-scrape
+  cancel-in-progress: false
+
 jobs:
   run-script:
     runs-on: ubuntu-latest

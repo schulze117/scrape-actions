@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# One finder at a time (guards against a slow run overlapping the schedule).
+concurrency:
+  group: immoscout-find
+  cancel-in-progress: false
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
