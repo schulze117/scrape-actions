@@ -29,10 +29,12 @@ class ImmoscoutScraper(BaseScraper):
     # One browser at a time — serial is gentler on the single residential proxy
     # and matches the finder. (max_workers=1 already made it serial; explicit here.)
     CONCURRENT_LISTINGS = False
-    # After the WAF challenge clears, wait until the expose JSON is in the page
-    # (hydrates in after the SSR shell) before capturing — see get_json_data,
-    # which parses IS24.expose.
-    READY_MARKER = "IS24.expose"
+    # Wait for the #is24-content div, NOT "IS24.expose": the JSON var is already
+    # in the ~32K SSR shell, but get_minified_html needs the rendered
+    # #is24-content div (and .print-hide), which only appears in the fully
+    # hydrated ~373K page. Waiting on IS24.expose captured the shell and every
+    # scrape failed with "Main section not found".
+    READY_MARKER = 'id="is24-content"'
 
     def __init__(self):
         method = config.scrape.immoscout.method
