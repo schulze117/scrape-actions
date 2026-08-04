@@ -33,8 +33,11 @@ class ImmoscoutFinder(BaseFinder):
     # get_json_data, which parses IS24.resultList.
     READY_MARKER = "IS24.resultList"
     # Newest-first, ~453 pages/category at ~30s each through the proxy — stop once
-    # a page has no new listings, and never crawl past MAX_PAGES as a safety net.
+    # 3 consecutive pages have no new listings (page 1 carries pinned promoted
+    # listings we usually already know, so a 1-page stop quit far too early), and
+    # never crawl past MAX_PAGES as a safety net.
     STOP_WHEN_NO_NEW = True
+    NO_NEW_PAGES_TO_STOP = 3
     MAX_PAGES = 40
 
     def __init__(self):

@@ -18,6 +18,11 @@ class BaseFinder(ABC):
     # pages are all already known. When True, paginate sequentially and stop
     # there (Immoscout: 453 pages/category at ~30s each is otherwise hours).
     STOP_WHEN_NO_NEW: bool = False
+    # How many *consecutive* pages must yield zero new listings before stopping.
+    # >1 guards against a single page that happens to be all-known (promoted /
+    # sponsored listings are pinned to page 1, so it can look empty while the
+    # pages behind it are full of new ones).
+    NO_NEW_PAGES_TO_STOP: int = 3
     # Hard safety cap on pages per location, whatever STOP_WHEN_NO_NEW decides.
     MAX_PAGES: int | None = None
 
@@ -78,16 +83,25 @@ class BaseFinder(ABC):
         if last_page <= 1:
             return
 
-        # 2a. Early-stop mode: walk pages in order, stop when one has no new
-        # listings (deeper pages are older, so all already known). A failed page
-        # (new_count is None) doesn't count as "no new" — keep going.
+        # 2a. Early-stop mode: walk pages in order, stop once NO_NEW_PAGES_TO_STOP
+        # consecutive pages have no new listings (deeper pages are older, so all
+        # already known). A single new listing resets the streak. A failed page
+        # (new_count is None) is neutral — it neither confirms nor breaks the
+        # streak, so a fetch error can't be mistaken for "no new listings".
         if self.STOP_WHEN_NO_NEW:
-            if new_count == 0:
+            empty_streak = 1 if new_count == 0 else 0
+            if empty_streak >= self.NO_NEW_PAGES_TO_STOP:
                 return
             for page in range(2, last_page + 1):
                 _, new_count = self.process_page_strategy(category, location, page)
-                if new_count == 0:
-                    self.logger.info(f"Early stop at page {page} for {location}: no new listings.")
+                if new_count is None:
+                    continue
+                empty_streak = empty_streak + 1 if new_count == 0 else 0
+                if empty_streak >= self.NO_NEW_PAGES_TO_STOP:
+                    self.logger.info(
+                        f"Early stop at page {page} for {location}: "
+                        f"{empty_streak} consecutive pages with no new listings."
+                    )
                     break
             return
 
