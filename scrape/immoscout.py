@@ -1,5 +1,3 @@
-# TODO: Check if bot detection is triggered. If yes, stop the scraper
-
 from typing import Any
 
 import demjson3  # type: ignore

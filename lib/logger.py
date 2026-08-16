@@ -32,9 +32,4 @@ def get_logger(name: str, loglevel: str = None) -> logging.Logger:
         sh.setFormatter(formatter)
         logger.addHandler(sh)
 
-        # fh = logging.FileHandler(f"{name}.log", mode="a", encoding="utf-8")
-        # fh.setLevel(logging.DEBUG)
-        # fh.setFormatter(formatter)
-        # logger.addHandler(fh)
-
     return logger

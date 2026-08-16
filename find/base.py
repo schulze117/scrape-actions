@@ -48,10 +48,6 @@ class BaseFinder(ABC):
         """
         for category_name, category in self.get_categories():
             locations = self.get_locations()
-            
-            # Limit for testing
-            # locations = locations[:3] 
-            # locations = ["16315"]
 
             self.logger.info(
                 f"Starting crawl for {category_name} with {len(locations)} locations. "

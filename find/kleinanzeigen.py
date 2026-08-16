@@ -32,10 +32,6 @@ class KleinanzeigenFinder(BaseFinder):
         page_path = f"seite:{page}/" if page > 1 else ""
         return f"{self.BASE_URL}/{page_path}c{category_id}l{location}"
 
-    # TODO: Can this be moved to base.py?
-    # def fetch_html(self, url: str) -> str:
-    #     return self.fetcher.fetch(url)
-
     def get_listings(self, soup: BeautifulSoup) -> list[NewListing]:
         entries_list = soup.find("ul", attrs={"id": "srchrslt-adtable"})
 

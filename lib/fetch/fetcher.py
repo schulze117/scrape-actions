@@ -1,7 +1,6 @@
 import atexit
 
 from lib.fetch._curl_cffi import get_html_curlcffi
-# from lib.fetch._playwright import get_html_playwright
 from lib.fetch._seleniumbase import get_html_seleniumbase
 from lib.proxy import FirewallManager
 
@@ -57,7 +56,6 @@ class Fetcher:
             return get_html_curlcffi(url, proxy_url=proxy_url)
 
         elif self.method == "playwright":
-            # return get_html_playwright(url, proxy_url=proxy_url)
             raise NotImplementedError("Playwright fetcher is not yet implemented.")
 
         elif self.method == "seleniumbase":
