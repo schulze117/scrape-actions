@@ -3,7 +3,7 @@ from lib.config import get_config, resolve_proxy
 from lib.database import Database
 from lib.models import KLEINANZEIGEN_SEARCH_CATEGORIES, ListingSource, NewListing
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
-from .base import BaseFinder
+from .base import BaseFinder, run_finder
 
 config = get_config()
 
@@ -95,5 +95,4 @@ class KleinanzeigenFinder(BaseFinder):
 
 # --- Entry Point ---
 if __name__ == "__main__":
-    finder = KleinanzeigenFinder()
-    finder.run()
+    run_finder(KleinanzeigenFinder)

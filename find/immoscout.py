@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup, Tag
 from lib.config import get_config, resolve_proxy
 from lib.models import IMMOSCOUT_SEARCH_CATEGORIES, ListingSource, NewListing
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
-from .base import BaseFinder
+from .base import BaseFinder, run_finder
 
 config = get_config()
 
@@ -108,5 +108,4 @@ class ImmoscoutFinder(BaseFinder):
 
 # --- Entry Point ---
 if __name__ == "__main__":
-    finder = ImmoscoutFinder()
-    finder.run()
+    run_finder(ImmoscoutFinder)

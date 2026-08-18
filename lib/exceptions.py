@@ -58,3 +58,35 @@ class HTMLValidationError(Exception):
 
     def __init__(self, message: str = "HTML content is invalid or empty"):
         super().__init__(message)
+
+
+class FetchNetworkError(Exception):
+    """Raised when the browser never reached the site — Chromium served its own
+    error page instead. Distinct from bot detection on purpose: a block means
+    the site refused us, this means we could not get there (dead proxy tunnel,
+    DNS, no route). Conflating the two sent us hunting for a WAF change while
+    the real fault was an unroutable proxy host.
+    """
+
+    def __init__(self, url: str, code: str):
+        super().__init__(f"Could not reach {url}: browser reported {code}")
+        self.url = url
+        self.code = code
+
+
+class FinderFailedError(Exception):
+    """Raised at the end of a find run that lost one or more categories.
+
+    Page 1 carries the page count, so a category whose page 1 never loads is
+    skipped whole. That is silent data loss, and it must colour the workflow
+    run red — a green tick on a zero-listing run is how immoscout stayed dead
+    for two days in August 2026.
+    """
+
+    def __init__(self, lost: list[str], total_new: int):
+        super().__init__(
+            f"{len(lost)} category/location crawls lost page 1 and were skipped "
+            f"({', '.join(lost)}); {total_new} new listings saved this run."
+        )
+        self.lost = lost
+        self.total_new = total_new

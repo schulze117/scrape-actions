@@ -26,6 +26,15 @@ BOT_DETECTION_MARKERS = (
     "just a moment...",         # Cloudflare interstitial title (block-only)
 )
 
+# Chromium's built-in network-error page ("This site can't be reached"). It is
+# ~186K of inlined CSS/JS, so it sails past the bot-detection length check, and
+# it carries none of the block-page markers — it looked to us exactly like a
+# real page whose parse failed. That is how a dead proxy tunnel masqueraded as
+# "immoscout changed their HTML" for two days in August 2026. Detecting it is
+# what separates "we could not reach the site" from "the site blocked us".
+_NETWORK_ERROR_RE = re.compile(r"\bERR_[A-Z0-9_]{3,}\b")
+_CHROME_ERROR_MARKER = "the chromium authors"
+
 
 _PORT_RANGE_RE = re.compile(r":(\d+)-(\d+)(/?)$")
 
@@ -86,3 +95,17 @@ def has_bot_detection(html: str, threshold: int = BOT_DETECTION_CHAR_THRESHOLD) 
             return True
 
     return False
+
+
+def get_network_error(html: str) -> str | None:
+    """Return the Chromium error code if `html` is the browser's error page.
+
+    A failed navigation still yields a large, well-formed document, so this must
+    be checked explicitly — neither the length threshold nor the block-page
+    markers catch it. Returns e.g. "ERR_TUNNEL_CONNECTION_FAILED" (proxy could
+    not reach the host) or None when the page is real content.
+    """
+    if _CHROME_ERROR_MARKER not in html[:400_000].lower():
+        return None
+    match = _NETWORK_ERROR_RE.search(html)
+    return match.group(0) if match else "ERR_UNKNOWN"

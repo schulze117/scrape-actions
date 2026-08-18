@@ -6,7 +6,8 @@ from seleniumbase import sb_cdp
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from lib.config import get_config
 from lib.logger import get_logger
-from lib.helpers import has_bot_detection
+from lib.helpers import get_network_error, has_bot_detection
+from lib.exceptions import FetchNetworkError
 
 config = get_config()
 logger = get_logger("_seleniumbase")
@@ -269,6 +270,16 @@ def _fetch_body(
         # Give a self-clearing challenge every chance to finish before we start
         # poking at it — intervening early is what used to lose these pages.
         html = _wait_out_challenge(sb)
+
+        # The navigation may never have reached the site at all. Chromium's error
+        # page is big and marker-free, so without this check it flows on as if it
+        # were content and only fails later, in the parser, as a misleading
+        # "element not found". Raise instead: @retry gets a chance, and the log
+        # names the real problem (a dead proxy tunnel, DNS, no route).
+        net_error = get_network_error(html)
+        if net_error:
+            raise FetchNetworkError(url, net_error)
+
         if not has_bot_detection(html):
             html = _finalize_html(sb, html, ready_marker)
 

@@ -9,7 +9,7 @@ from lib.logger import get_logger
 from lib.config import get_config, resolve_proxy
 from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
 from lib.models import IMMOWELT_SEARCH_CATEGORIES, ListingSource, NewListing
-from .base import BaseFinder
+from .base import BaseFinder, run_finder
 
 config = get_config()
 logger = get_logger("immowelt")
@@ -98,5 +98,4 @@ def extract_listing_data(listing: dict[str, str]) -> NewListing:
 
 
 if __name__ == "__main__":
-    finder = ImmoweltFinder()
-    finder.run()
+    run_finder(ImmoweltFinder)

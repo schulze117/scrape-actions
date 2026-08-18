@@ -1,15 +1,22 @@
-seleniumbase>=4.51.1
-sbvirtualdisplay
-pyvirtualdisplay
-google-cloud-compute
-google-auth
-requests
-beautifulsoup4
-lxml
-lzstring
-curl_cffi
-tenacity
-psycopg
-python-dotenv
-pydantic
-demjson3
+# Pinned deliberately. This scraper's job depends on staying undetected, and the
+# stealth stack (seleniumbase + selenium + mycdp) changes behaviour between
+# patch releases — an unpinned floor meant every scheduled run installed
+# whatever was newest that morning, so the fetch layer could change under us
+# with no commit and no warning. Versions below are the set running in
+# production as of 2026-08-18. Upgrade on purpose: bump, run the Test Fetch URL
+# workflow against immoscout, then commit.
+seleniumbase==4.51.12
+sbvirtualdisplay==1.4.0
+pyvirtualdisplay==3.0
+google-cloud-compute==1.50.0
+google-auth==2.56.3
+requests==2.34.2
+beautifulsoup4==4.15.0
+lxml==6.1.1
+lzstring==1.0.4
+curl_cffi==0.16.0
+tenacity==9.1.4
+psycopg==3.3.4
+python-dotenv==1.2.3
+pydantic==2.13.4
+demjson3==3.0.6
