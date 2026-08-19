@@ -20,6 +20,16 @@ lz = LZString()
 class ImmoweltFinder(BaseFinder):
     CONCURRENT_LOCATIONS = False
     BASE_URL = "https://www.immowelt.de/classified-search"
+    # build_url pins order=DateDesc, so results are newest-first: >95% of new
+    # listings land on pages 1-4 and the rest of the ~70 pages are already known.
+    # Crawling to the bottom anyway is what broke this finder — DataDome starts
+    # blocking around page 45, and the ~50 min of blocked fetches that follow burn
+    # the IP badly enough that the next categories lose page 1 and are skipped
+    # whole. Stop after 3 consecutive pages with nothing new; MAX_PAGES is the
+    # safety net for the first run after an outage, when depth is actually useful.
+    STOP_WHEN_NO_NEW = True
+    NO_NEW_PAGES_TO_STOP = 3
+    MAX_PAGES = 20
 
 
     def __init__(self):
