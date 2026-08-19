@@ -166,7 +166,9 @@ def _build_chrome_kwargs(proxy_url: str | None) -> dict:
         "incognito": incognito,
         "lang": _sb_setting("lang", _sb_setting("locale", DEFAULT_LANG)),
     }
-    # Unbranded Chromium (mdmintz: most stealthy for the hardest cases).
+    # Unbranded Chromium. Off by default (see DEFAULT_USE_CHROMIUM); the
+    # SeleniumBase stealth docs don't actually list it as an anti-detection
+    # measure, so don't reach for it before the exit IP.
     if _sb_setting("use_chromium", DEFAULT_USE_CHROMIUM):
         kwargs["use_chromium"] = True
     # Timezone + geolocation to match the exit IP.
