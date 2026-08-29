@@ -1,10 +1,18 @@
 name: Run Immoscout Scraper
 
+# Triggered from the VPS, not by GitHub. `/etc/cron.d/fixfolio` there fires this
+# through the REST API, and the cadence and the work budget both live in it.
+# (This repo is public — the host is named in ../infrastructure.md, not here.)
+# GitHub's own `schedule:` is deliberately absent: it dispatched events
+# 35-50 min late at rest and from 2026-08-26 dropped roughly two thirds of them
+# account-wide, leaving no record, no failure and no log. See ../ecosystem.md.
 on:
-  schedule:
-     - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
+      time_budget_min:
+        description: 'Minutes of scraping before the run stops itself (0 = unlimited)'
+        required: false
+        default: '100'
       use_proxy:
         description: 'Route through the AI-server proxy over Tailscale (set false to force a direct, unproxied run)'
         required: false
@@ -25,11 +33,19 @@ jobs:
   run-script:
     runs-on: ubuntu-latest
 
-    # Empty on scheduled runs -> resolve_proxy() falls back to
-    # config.scrape.immoscout.use_proxy (true) -> proxy on. A manual dispatch with
-    # use_proxy=false forces a direct run (only useful for A/B testing the WAF).
+    # Backstop only. GitHub kills a hosted job at 6 h and reports that as
+    # `cancelled` — no exit code, no summary, looks exactly like a crash. The
+    # scraper stops itself at `time_budget_min` well before this, so hitting 120
+    # means the budget failed to apply, and a red run says so.
+    timeout-minutes: 120
+
+    # Empty on a hand-run dispatch -> resolve_proxy() falls back to
+    # config.scrape.immoscout.use_proxy (true) -> proxy on, and the scraper falls
+    # back to BaseScraper.TIME_BUDGET_MIN. A dispatch with use_proxy=false forces
+    # a direct run (only useful for A/B testing the WAF).
     env:
       USE_PROXY: ${{ inputs.use_proxy }}
+      SCRAPE_TIME_BUDGET_MIN: ${{ inputs.time_budget_min }}
 
     steps:
       - name: Checkout code

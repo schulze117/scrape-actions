@@ -1,10 +1,11 @@
 import concurrent.futures
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
 from bs4 import BeautifulSoup
 
-from lib.config import get_config
+from lib.config import env_get, get_config
 from lib.database import Database
 from lib.exceptions import InactiveListingError
 from lib.fetch.fetcher import Fetcher
@@ -21,6 +22,30 @@ class BaseScraper(ABC):
     # A string only the fully-rendered page contains; the browser fetcher waits
     # for it so we don't capture the pre-hydration shell. None = no wait (curl).
     READY_MARKER: str | None = None
+    # Wall-clock minutes one run may use before it stops itself.
+    #
+    # This default is only the fallback for a hand-run dispatch. In production the
+    # scheduler passes the number in as `SCRAPE_TIME_BUDGET_MIN`, because a budget
+    # has to fit the gap to the next fire and the cron line is what decides that
+    # gap — so both live together in /etc/cron.d/fixfolio on the VPS, and neither
+    # is in this file. See ../ecosystem.md. The three platforms deliberately do
+    # not share a number: immoscout is arrival-limited (100 min every 2 h),
+    # kleinanzeigen is throughput-limited (320 min every 6 h).
+    #
+    # The ceiling that does not move is the runner. A GitHub-hosted job is killed
+    # at 6 h and that kill is reported as `cancelled` — no exit code, no summary
+    # line, indistinguishable from a crash. That is how three scrape workflows
+    # spent August looking broken while working correctly.
+    #
+    # Overrunning is not corruption — batches are claimed with FOR UPDATE SKIP
+    # LOCKED, so two runs never take the same listing — but it doubles the load
+    # on one portal and one residential proxy, which is what the `concurrency`
+    # groups exist to prevent.
+    #
+    # Stopping costs nothing: the queue is claimed in batches and every listing
+    # commits its own row, so whatever is left stays queued for the next run.
+    # `0` means unlimited, which is what a local drain wants.
+    TIME_BUDGET_MIN = 270
 
     def __init__(self, source: ListingSource, method: str, proxy_url: str | None):
         self.source = source
@@ -31,26 +56,52 @@ class BaseScraper(ABC):
         method_config = getattr(self.config, method)
         self.max_workers = method_config.max_workers
 
+    def _time_budget_s(self) -> float:
+        """Seconds of wall clock this run may use; 0 for unlimited.
+
+        `SCRAPE_TIME_BUDGET_MIN` wins over the class default, so the number can
+        be retuned from the workflow — where it has to stay under that job's own
+        `timeout-minutes` — without shipping code.
+        """
+        minutes = self.TIME_BUDGET_MIN
+        raw = env_get("SCRAPE_TIME_BUDGET_MIN")
+        if raw is not None:
+            try:
+                minutes = float(raw)
+            except ValueError:
+                self.logger.warning(
+                    f"SCRAPE_TIME_BUDGET_MIN={raw!r} is not a number; using {minutes} min."
+                )
+        return max(0.0, minutes) * 60.0
+
     def run(self):
         """
         Main strategy:
         1. Fetch a batch of unscraped listings from the DB
         2. Process each listing (Concurrently OR Sequentially based on flag)
-        3. Repeat until no listings remain or interrupted with Ctrl+C
+        3. Repeat until the queue is empty, the time budget is spent, or Ctrl+C
         """
         scrape_config = getattr(self.config.scrape, self.source.value)
         batch_size = scrape_config.batch_size
         total_scraped = 0
+        budget_s = self._time_budget_s()
+        started = time.monotonic()
+
+        def over_budget() -> bool:
+            return bool(budget_s) and (time.monotonic() - started) >= budget_s
 
         try:
             while True:
+                if over_budget():
+                    break
+
                 listings = self.db.get_next_listings(
                     self.source, batch_size, rescrape_on_modified_only=self.RESCRAPE_ON_MODIFIED_ONLY
                 )
 
                 if not listings:
                     self.logger.info(f"No more listings to scrape. Total processed: {total_scraped}")
-                    break
+                    return
 
                 self.logger.info(
                     f"Starting batch of {len(listings)} listings. "
@@ -58,20 +109,38 @@ class BaseScraper(ABC):
                 )
 
                 if self.CONCURRENT_LISTINGS:
+                    # A concurrent batch always runs to completion: its listings
+                    # are already claimed, and cancelling futures mid-flight would
+                    # leave them claimed but unscraped until the claim expires.
+                    # curl_cffi batches are short, so between batches is a fine
+                    # place to be the only checkpoint.
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                         futures = [
                             executor.submit(self.process_listing, listing)
                             for listing in listings
                         ]
                         concurrent.futures.wait(futures)
+                    total_scraped += len(listings)
                 else:
+                    # Checked per listing rather than per batch: one seleniumbase
+                    # fetch can burn FETCH_HARD_TIMEOUT x max_retries (~6 min), so
+                    # a batch boundary is too coarse to keep the overshoot inside
+                    # the headroom the default budget leaves.
                     for listing in listings:
                         self.process_listing(listing)
-
-                total_scraped += len(listings)
+                        total_scraped += 1
+                        if over_budget():
+                            break
 
         except KeyboardInterrupt:
             self.logger.info(f"Interrupted. Total processed: {total_scraped}")
+            return
+
+        self.logger.info(
+            f"Time budget of {budget_s / 60:.0f} min spent after "
+            f"{(time.monotonic() - started) / 60:.0f} min. Stopping cleanly; the rest "
+            f"stays queued for the next run. Total processed: {total_scraped}"
+        )
 
     def process_listing(self, listing: NextListingModel):
         """Fetch, extract, and save data for a single listing."""

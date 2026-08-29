@@ -1,8 +1,8 @@
 name: Run Kleinanzeigen Finder
 
+# Triggered from the VPS, not by GitHub — see immoscout_scrape.yaml and
+# ../ecosystem.md. The cadence lives in /etc/cron.d/fixfolio.
 on:
-  schedule:
-    - cron: '0 */12 * * *'
   workflow_dispatch:
 
 jobs:

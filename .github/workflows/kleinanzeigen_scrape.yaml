@@ -1,13 +1,33 @@
 name: Run Kleinanzeigen Scraper
 
+# Triggered from the VPS, not by GitHub — see immoscout_scrape.yaml and
+# ../ecosystem.md. The cadence and the work budget live in /etc/cron.d/fixfolio.
 on:
-  schedule:
-    - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      time_budget_min:
+        description: 'Minutes of scraping before the run stops itself (0 = unlimited)'
+        required: false
+        default: '320'
+
+# One scraper at a time — see immowelt_scrape.yaml. New triggers queue (at most
+# one pending) instead of cancelling the active run.
+concurrency:
+  group: kleinanzeigen-scrape
+  cancel-in-progress: false
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
+
+    # Backstop only — see immoscout_scrape.yaml. The scraper stops itself at
+    # `time_budget_min` long before this. This is the one scraper that is
+    # genuinely throughput-limited (26 248 listings in a single 327 min run on
+    # 2026-08-29), so it is also the one budgeted closest to the 6 h kill.
+    timeout-minutes: 345
+
+    env:
+      SCRAPE_TIME_BUDGET_MIN: ${{ inputs.time_budget_min }}
 
     steps:
       - name: Checkout code

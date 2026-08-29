@@ -1,8 +1,11 @@
 name: Run Immoscout Finder
 
+# Triggered from the VPS, not by GitHub — see immoscout_scrape.yaml and
+# ../ecosystem.md. This one owns 06:00 and 18:00 UTC alone: immoscout find and
+# immoscout scrape are the only two jobs that share the AI server's residential
+# proxy, so the scrape schedule skips those two slots rather than double the load
+# on the one IP that clears the WAF.
 on:
-  schedule:
-    - cron: '0 */12 * * *'
   workflow_dispatch:
     inputs:
       use_proxy:

@@ -1,10 +1,14 @@
 name: Run Immowelt Scraper
 
+# Triggered from the VPS, not by GitHub — see immoscout_scrape.yaml and
+# ../ecosystem.md. The cadence and the work budget live in /etc/cron.d/fixfolio.
 on:
-  schedule:
-     - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
+      time_budget_min:
+        description: 'Minutes of scraping before the run stops itself (0 = unlimited)'
+        required: false
+        default: '220'
       retry_count:
         description: 'Bot detection retry attempt'
         required: false
@@ -14,9 +18,25 @@ permissions:
   contents: read
   actions: write
 
+# One scraper at a time. A run that starts late (GitHub dispatches the schedule
+# event 35-50 min after the slot) and spends its full TIME_BUDGET_MIN can still
+# be going when the next slot arrives; without this the two would overlap and
+# hammer the portal twice over. New triggers queue (at most one pending) instead
+# of cancelling the active run.
+concurrency:
+  group: immowelt-scrape
+  cancel-in-progress: false
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
+
+    # Backstop only — see immoscout_scrape.yaml. The scraper stops itself at
+    # `time_budget_min` long before this.
+    timeout-minutes: 240
+
+    env:
+      SCRAPE_TIME_BUDGET_MIN: ${{ inputs.time_budget_min }}
 
     steps:
       - name: Checkout code
