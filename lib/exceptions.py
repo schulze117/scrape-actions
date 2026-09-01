@@ -30,6 +30,25 @@ class NotBeautifulSoupError(ScrapeError):
         super().__init__(f'Element "{item_name}" is not a BeautifulSoup object')
 
 
+class StructureChangedError(ScrapeError):
+    """Raised when a page loaded and its container parsed, but the content inside
+    no longer has the shape the parser expects.
+
+    Distinct from ElementNotFoundError by where the change lands. A missing
+    container fails on its own. A renamed field inside intact markup does not —
+    it yields an *empty* result, which reads exactly like a quiet day:
+    process_page_strategy scores it as new_count=0, the early-stop streak accepts
+    it, and the run exits green having found nothing. Empty is therefore the
+    dangerous case, and the parser has to raise rather than return it. That turns
+    it into new_count=None, which fails the page and colours the run red.
+    """
+
+    def __init__(self, item_name: str, detail: str):
+        super().__init__(f'Structure of "{item_name}" changed: {detail}')
+        self.item_name = item_name
+        self.detail = detail
+
+
 class InactiveListingError(ScrapeError):
     """Raised when a listing is inactive."""
 

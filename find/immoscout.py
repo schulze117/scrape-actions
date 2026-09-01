@@ -4,10 +4,35 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from lib.config import get_config, resolve_proxy
 from lib.models import IMMOSCOUT_SEARCH_CATEGORIES, ListingSource, NewListing
-from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError
+from lib.exceptions import ElementNotFoundError, NotBeautifulSoupError, StructureChangedError
 from .base import BaseFinder, run_finder
 
 config = get_config()
+
+# Everything extract_listing_data needs. An entry missing one of these is skipped,
+# not fatal — IS24 serves the occasional new-build object without @creation.
+REQUIRED_LISTING_KEYS = frozenset({"@id", "@modification", "@creation"})
+
+def has_listing_keys(entry: Any) -> bool:
+    return isinstance(entry, dict) and REQUIRED_LISTING_KEYS <= entry.keys()
+
+def get_similar_entries(entry: dict[str, Any]) -> list[Any]:
+    """The similarObject dicts nested under one result entry.
+
+    similarObjects is a bonus field, so no shape it arrives in may take the page
+    down with it — the main entries on that page are the data we actually came
+    for. Returns [] for anything unexpected rather than raising.
+    """
+    groups = entry.get("similarObjects")
+    if isinstance(groups, dict):
+        groups = [groups]
+    if not isinstance(groups, list) or not groups or not isinstance(groups[0], dict):
+        return []
+
+    similar = groups[0].get("similarObject")
+    if isinstance(similar, dict):
+        return [similar]
+    return similar if isinstance(similar, list) else []
 
 def extract_listing_data(listing: dict[str, Any]) -> NewListing:
     modified_at = listing.get("@modification")
@@ -39,6 +64,9 @@ class ImmoscoutFinder(BaseFinder):
     STOP_WHEN_NO_NEW = True
     NO_NEW_PAGES_TO_STOP = 3
     MAX_PAGES = 40
+    # A results page holds 20 entries. Fewer means the result set really does end
+    # here; a full one with no pagination cannot — see get_pages_count.
+    FULL_PAGE_ENTRIES = 20
 
     def __init__(self):
         method = config.find.immoscout.method
@@ -75,36 +103,88 @@ class ImmoscoutFinder(BaseFinder):
 
         return json.loads(json_data)
 
-    def get_listings(self, soup: BeautifulSoup) -> list[NewListing]:
+    def get_result_entries(self, soup: BeautifulSoup) -> list[dict[str, Any]]:
+        """The raw resultlistEntry list, normalised to a list.
+
+        The JSON is converted from XML, so a page holding a single hit collapses
+        resultlistEntry to a bare dict instead of a one-element list. Iterating
+        that yields key strings, which look like unparsable entries — and with
+        get_listings now raising on "nothing parsed", that would fail a perfectly
+        good page.
+        """
         json_data = self.get_json_data(soup)
         result_list = json_data["searchResponseModel"]["resultlist.resultlist"]["resultlistEntries"][0]
-        if "resultlistEntry" not in result_list:
+
+        entries = result_list.get("resultlistEntry")
+        if isinstance(entries, dict):
+            return [entries]
+        return entries if isinstance(entries, list) else []
+
+    def get_listings(self, soup: BeautifulSoup) -> list[NewListing]:
+        result_entries = self.get_result_entries(soup)
+        if not result_entries:
             self.logger.warning("No listings found on this page, skipping")
             return []
 
-        result_entries: list[dict[str, Any]] = result_list["resultlistEntry"]
         listings: list[NewListing] = []
+        skipped = 0
 
         for entry in result_entries:
-            if "@id" not in entry or "@modification" not in entry or "@creation" not in entry:
+            if not has_listing_keys(entry):
+                skipped += 1
                 continue
             listings.append(extract_listing_data(entry))
 
-            if "similarObjects" in entry:
-                similar_objects: list[Any] = entry["similarObjects"][0]["similarObject"]
-                for similar_entry in similar_objects:
-                    if not isinstance(similar_entry, dict) or "@id" not in similar_entry:
-                        continue
-                    listings.append(extract_listing_data(similar_entry))
+            # The same guard as above. This branch used to check "@id" alone, so
+            # a similar object without @creation reached extract_listing_data,
+            # raised, and cost the whole category its page 1.
+            for similar_entry in get_similar_entries(entry):
+                if not has_listing_keys(similar_entry):
+                    skipped += 1
+                    continue
+                listings.append(extract_listing_data(similar_entry))
+
+        # Skipping a stray entry is routine; skipping every one of them is a
+        # renamed field, and it must not pass as "no new listings" — that scores
+        # as new_count=0, feeds the early-stop streak, and exits the run green.
+        if not listings:
+            raise StructureChangedError(
+                "resultlistEntry",
+                f"{len(result_entries)} entries on the page, none carrying {sorted(REQUIRED_LISTING_KEYS)}",
+            )
+        if skipped:
+            self.logger.warning(
+                f"Skipped {skipped} unparsable entries of {len(result_entries)} on the page "
+                f"(missing {sorted(REQUIRED_LISTING_KEYS)}) — a rising share is the warning "
+                f"before it reaches all of them."
+            )
+
         return listings
 
     def get_pages_count(self, soup: BeautifulSoup) -> int:
         pagination_buttons = soup.find_all(attrs={"data-testid": "pagination-button"})
-        if len(pagination_buttons) < 2:
-            self.logger.warning("No pagination buttons found, assuming only one page")
-            return 1
-        last_page_number = int(pagination_buttons[-1].get_text(strip=True))
-        return last_page_number
+        if len(pagination_buttons) >= 2:
+            return int(pagination_buttons[-1].get_text(strip=True))
+
+        # No pagination on this page: either the result set fits on one page, or
+        # data-testid moved and the page count is no longer visible to us.
+        # Answering 1 to both used to cap every category at page 1 while the run
+        # still exited green — up to MAX_PAGES worth of listings, silently gone.
+        # A full page cannot be a one-page result set, so that combination is the
+        # selector breaking and has to fail loudly. Re-parsing the JSON here costs
+        # milliseconds against a ~30 s fetch.
+        # The trade is deliberate: a category with exactly FULL_PAGE_ENTRIES hits
+        # and no pagination trips this falsely, costing one red run that fixes
+        # itself on the next crawl. The silent version costs weeks of missing data.
+        entry_count = len(self.get_result_entries(soup))
+        if entry_count >= self.FULL_PAGE_ENTRIES:
+            raise StructureChangedError(
+                "pagination-button",
+                f"{entry_count} entries on the page but no pagination buttons",
+            )
+
+        self.logger.info(f"No pagination buttons, {entry_count} entries — single-page result set.")
+        return 1
 
 # --- Entry Point ---
 if __name__ == "__main__":
